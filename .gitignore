@@ -4,6 +4,7 @@
 
 # Repo metadata
 !/.gitignore
+!/.gitattributes
 !/README.md
 !/BUILDING.md
 !/LICENSE

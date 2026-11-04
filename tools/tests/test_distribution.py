@@ -172,11 +172,18 @@ class DistributionTests(unittest.TestCase):
     def test_certificate_generation_preserves_existing_keys(self):
         certs = self.root / "certs"
         certs.mkdir()
-        command = ["bash", str(TOOLS / "distribution/certgen.sh")]
-        env = dict(os.environ, HOA_CERTS_DIR=str(certs), MSYS_NO_PATHCONV="1")
-        subprocess.run(command, env=env, check=True, capture_output=True)
+        bash = shutil.which("bash")
+        if os.name == "nt":
+            git_bash = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin/bash.exe"
+            if git_bash.is_file():
+                bash = str(git_bash)
+        command = [bash, (TOOLS / "distribution/certgen.sh").as_posix()]
+        env = dict(os.environ, HOA_CERTS_DIR=certs.as_posix(), MSYS_NO_PATHCONV="1")
+        result = subprocess.run(command, env=env, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
         key = (certs / "ca/forever_root_ca.key").read_bytes()
-        subprocess.run(command, env=env, check=True, capture_output=True)
+        result = subprocess.run(command, env=env, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
         self.assertEqual((certs / "ca/forever_root_ca.key").read_bytes(), key)
         subprocess.run(["openssl", "verify", "-verify_hostname", "trinity.actual.battle.net",
                         "-CAfile", str(certs / "ca/forever_root_ca.crt"), str(certs / "forever.cert.pem")],

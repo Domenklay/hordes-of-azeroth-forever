@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: offline-release
+  cancel-in-progress: true
+
 env:
   FOREVER_REF: a7e7747778042b537d062f019bbf2465d67a2863
   PYTHONUTF8: '1'
@@ -60,7 +64,15 @@ jobs:
           FOREVER_TEST_SOURCE: donor
           MSYS_NO_PATHCONV: '1'
         run: |
-          python -m unittest discover -s tools/tests -p 'test_distribution.py' -v
+          python - <<'PY'
+          import subprocess,sys
+          result=subprocess.run([sys.executable,'-m','unittest','discover','-s','tools/tests','-p','test_distribution.py','-v'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+          print(result.stdout)
+          if result.returncode:
+              detail=result.stdout[-18000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+              print('::error title=Distribution tests::'+detail)
+              sys.exit(result.returncode)
+          PY
           python tools/distribution/patch_native.py donor
           # Build-only public fallback. Its private key is deleted and never packaged.
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=Build-only placeholder' -keyout build-only.key -out donor/app/src-tauri/resources/forever_root_ca.crt
