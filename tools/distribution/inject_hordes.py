@@ -7,6 +7,19 @@ import shutil
 
 
 def inject(core, module):
+    # The pinned donor already routes its own FSC1 requests to the session's
+    # player before whisper target resolution. Extend that explicit endpoint
+    # to our independent prefix: Forever can suppress self-addressed whispers.
+    chat = core / "src/server/game/Handlers/ChatHandler.cpp"
+    if chat.exists():
+        handler = chat.read_text(encoding="utf-8")
+        old = 'if (type == CHAT_MSG_WHISPER && prefix == "FSC1")'
+        new = 'if (type == CHAT_MSG_WHISPER && (prefix == "FSC1" || prefix == "HOAQ1"))'
+        if handler.count(old) == 1 and new not in handler:
+            handler = handler.replace(old, new, 1)
+        elif handler.count(new) != 1:
+            raise ValueError("Pinned server-bound addon endpoint changed")
+        chat.write_text(handler, encoding="utf-8")
     loader = core / "src/server/scripts/Custom/custom_script_loader.cpp"
     text = loader.read_text(encoding="utf-8")
     declaration = "void AddSC_hordes_forever();"

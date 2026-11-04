@@ -35,7 +35,7 @@ jobs:
       - name: Build the actual survivor adapter and engine
         run: |
           set -o pipefail
-          docker build --build-arg BUILD_JOBS=2 --tag hoa-forever-core:0.2.0-preview.1 donor 2>&1 | tee engine-build.log
+          docker build --build-arg BUILD_JOBS=2 --tag hoa-forever-core:0.2.0-preview.3 donor 2>&1 | tee engine-build.log
       - name: Expose useful failure details
         if: failure()
         run: |
@@ -51,7 +51,7 @@ jobs:
         run: |
           mkdir -p output
           set -o pipefail
-          docker save hoa-forever-core:0.2.0-preview.1 | gzip -1 > output/core.tar.gz
+          docker save hoa-forever-core:0.2.0-preview.3 | gzip -1 > output/core.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: hordes-engine
