@@ -31,7 +31,8 @@ class LauncherGuiTests(unittest.TestCase):
                 self.assertEqual(launcher.notebook.select(), str(launcher.logs_page))
                 self.assertNotIn("\n", launcher.status.get())
                 button.invoke()
-                self.assertEqual(window.clipboard_get(), output)
+                # Each journal entry deliberately ends with a newline.
+                self.assertEqual(window.clipboard_get(), output + "\n")
                 self.assertEqual(launcher.log.get("1.0", "end-1c").rstrip("\n"), output)
             finally:
                 window.destroy()
