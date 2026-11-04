@@ -12,7 +12,7 @@ on:
       version:
         description: 'Unique installer patch version'
         required: true
-        default: '0.2.0-preview.4'
+        default: '0.2.0-preview.5'
 
 permissions:
   contents: read
@@ -41,7 +41,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           version="${INPUT_VERSION:-${GITHUB_REF_NAME#survivor-v}}"
-          if [[ "$version" == main ]]; then version=0.2.0-preview.4; fi
+          if [[ "$version" == main ]]; then version=0.2.0-preview.5; fi
           [[ "$version" =~ ^[0-9][A-Za-z0-9._-]{0,60}$ ]] || exit 1
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=offline-v$version" >> "$GITHUB_OUTPUT"
@@ -126,6 +126,7 @@ jobs:
           /tmp/hordes-rules
           lua5.1 tools/tests/hordes_addon.lua
           python3 tools/distribution/smoke_runtime.py --directory input --survivor
+          HOA_TEST_DOCKER=1 python3 -m unittest discover -s tools/tests -p test_diagnostics_docker.py -v
       - name: Prepare release assets
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
@@ -145,13 +146,15 @@ jobs:
                   output.write(f'{value}  {path.name}\n')
           PY
           cat > notes.md <<'EOF'
-          Исправление окна журнала Windows-лаунчера.
-          Журнал вынесен на отдельную вкладку с прокруткой; «Скопировать журнал» закреплена в нижней панели.
-          Многострочный вывод больше не растягивает строку состояния и не выталкивает кнопки за окно.
-          Проверено настоящее окно Tk на Windows при 3000 строках, минимальном размере и увеличенном масштабе.
-          Весь текст проверен через буфер обмена. В состоянии движка отображается образ запущенного мира.
-          Движок 0.2.0-preview.3 и игровой аддон не изменялись; используются готовые пакеты из кэша.
-          Подключение меню режима на клиенте 70532 ещё исследуется. Этот выпуск исправляет окно журнала и не заявляет исправление входа в забег.
+          Диагностика связи игрового меню с локальным движком.
+          Вкладка «Журнал» → «Проверить обмен с игрой (20 сек)» временно включает журнал номеров входящих команд.
+          В течение записи в игре нажмите «Проверить связь», затем вручную отправьте .hoa status в обычный чат.
+          После записи прежние уровни журнала восстанавливаются, консоль отсоединяется без остановки мира.
+          Отчёт содержит только названия и номера пакетов: без текста чата, имён, IP-адресов и содержимого пакетов.
+          Проверены Windows named pipe, окно Tk и буфер обмена, реальный Docker-поток и восстановление после прерывания.
+          Кнопка копирования журнала закреплена в нижней панели.
+          Движок 0.2.0-preview.3 и игровой аддон не изменялись. Для диагностики достаточно обновить EXE лаунчера.
+          Подключение меню режима на клиенте 70532 ещё исследуется. Этот выпуск собирает данные и не заявляет исправление входа в забег.
           Это одиночный прототип, полный перенос исходного Hordes не завершён.
           Требуются Docker Desktop (Linux containers) и собственный клиент. Клиент и игровые данные не распространяются.
           EOF
@@ -160,6 +163,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.metadata.outputs.tag }}
         run: |
-          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Hordes Forever — исправление окна журнала" --notes-file notes.md release/*
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Hordes Forever — диагностика связи с игрой" --notes-file notes.md release/*
           gh release edit "$TAG" --draft=false --latest
           gh release edit offline-v0.1.0-preview.2 --prerelease --latest=false --title "Superseded: MySQL first-start issue (use preview.3 or newer)"
