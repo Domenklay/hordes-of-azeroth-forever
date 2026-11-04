@@ -7,7 +7,7 @@ import subprocess
 
 import offline
 from .installer import validate_client
-from . import survivor
+from . import survivor, realms
 
 SERVICES = {"mysql": "База", "worldserver": "Игровой мир", "bnetserver": "Авторизация"}
 
@@ -127,7 +127,7 @@ def console(root):
                             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
 
 
-def launch(root, version, manifest, client):
+def launch(root, version, manifest, client, progress=lambda _: None):
     validate_client(client, manifest["clientBuild"])
     require_ready(root)
     if manifest.get("modeProtocol") == 1:
@@ -136,6 +136,8 @@ def launch(root, version, manifest, client):
         if saved["core_image"] != expected:
             raise ValueError("Сначала нажмите «Запустить локальный движок», чтобы обновить его до вампирлайка.")
         survivor.install_addon(version, client)
+        realms.ensure(root, manifest["clientBuild"], progress)
+        realms.select_client_realm(root, client)
     native = version / "game-launcher" / "forever-launcher.exe"
     if not native.is_file():
         raise ValueError("Не установлен игровой лаунчер")

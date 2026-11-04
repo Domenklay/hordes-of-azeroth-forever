@@ -13,8 +13,9 @@ ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 CONFIG = ROOT / "config" / "offline"
 
 
-def capture_command(command, env=None, check=True):
+def capture_command(command, env=None, check=True, input=None):
     return subprocess.run(command, env=env, check=check, capture_output=True, text=True,
+                          input=input,
                           encoding="utf-8", errors="replace",
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 

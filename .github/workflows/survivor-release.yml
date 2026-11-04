@@ -10,7 +10,7 @@ on:
       version:
         description: 'Unique installer patch version'
         required: true
-        default: '0.2.0-preview.1'
+        default: '0.2.0-preview.2'
 
 permissions:
   contents: read
@@ -38,7 +38,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           version="${INPUT_VERSION:-${GITHUB_REF_NAME#survivor-v}}"
-          if [[ "$version" == main ]]; then version=0.2.0-preview.1; fi
+          if [[ "$version" == main ]]; then version=0.2.0-preview.2; fi
           [[ "$version" =~ ^[0-9][A-Za-z0-9._-]{0,60}$ ]] || exit 1
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=offline-v$version" >> "$GITHUB_OUTPUT"
@@ -140,7 +140,13 @@ jobs:
                   output.write(f'{value}  {path.name}\n')
           PY
           cat > notes.md <<'EOF'
-          Первый одиночный прототип вампирлайка для Forever 1.60.1.70532.
+          Исправление списка миров для локального вампирлайка Forever 1.60.1.70532.
+          Перед игровым запуском доступен только локальный Normal/PvE «Hordes Offline» на порту 8085.
+          Незапущенные PvP, RP и Hardcore скрыты с сохранением их строк в базе и резервной копии списка.
+          Авторизация обновляет кэш после готовности мира; оба TLS-порта проверяются с локальным CA и проверкой имени.
+          Движок не изменён: используются те же готовые образы, проверенный кэш загрузок сохраняется.
+          В журнале теперь виден HOA_MODE_V1_READY и причины отказа игрового подключения.
+          Одиночный прототип вампирлайка для Forever 1.60.1.70532.
           12 волн на арене Гурубаши, автоматические атаки, 6 улучшений на выбор, финальный босс и сохранение рекорда.
           После входа персонажем нажмите «Начать забег» в русском меню Hordes; открыть меню вручную: /hordes.
           Обновление: закройте игру, установите компоненты и запустите движок новым HordesForeverSetup.exe.
@@ -156,6 +162,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.metadata.outputs.tag }}
         run: |
-          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Hordes Forever — вампирлайк, первый прототип" --notes-file notes.md release/*
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Hordes Forever — исправление списка локальных миров" --notes-file notes.md release/*
           gh release edit "$TAG" --draft=false --latest
           gh release edit offline-v0.1.0-preview.2 --prerelease --latest=false --title "Superseded: MySQL first-start issue (use preview.3 or newer)"

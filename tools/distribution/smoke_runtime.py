@@ -14,7 +14,7 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import offline
 from distribution import runtime
-from distribution import survivor
+from distribution import survivor, realms
 
 
 def test_survivor_sql(image, query, env, root, state):
@@ -54,6 +54,32 @@ def test_survivor_sql(image, query, env, root, state):
     if json.loads((state / "settings.json").read_text())["core_image"] != image:
         raise ValueError("Profile did not switch to the verified engine after backup")
     print("PASS: actual pinned SQL schema, repeated additive migration and real account/character backup")
+    auth = embedded("base/auth_database.sql")
+    table = re.search(r"CREATE TABLE `realmlist` \(.*?;", auth, re.S).group()
+    execute(query, env=env, input=("USE auth;\n" + table + "\n"
+        "ALTER TABLE realmlist ADD COLUMN contentSetId INT UNSIGNED NOT NULL DEFAULT 137;\n"
+        "INSERT INTO realmlist (id,name,port,icon,flag,gamebuild,contentSetId) VALUES "
+        "(70,'Local Normal',8085,0,0,70532,137),(71,'Forever PvP',8095,1,0,70532,136),"
+        "(72,'Forever RP',8105,6,0,70532,138),(73,'Forever Hardcore',8115,0,0,70532,140);\n"))
+    _, realm_env, command = offline.configuration(state)
+    if not realms.configure(root, command, realm_env, 70532, print):
+        raise ValueError("The inherited catalog was not repaired")
+    actual = execute(query, env=env, input=(
+        "SELECT id,name,port,icon,contentSetId FROM auth.realmlist WHERE flag<>3 ORDER BY id;\n"
+        "SELECT COUNT(*) FROM auth.realmlist;\n"
+        "SELECT value FROM characters.hoa_ci_persistence WHERE id=1;\n"))
+    if actual.strip().splitlines() != ["70\tHordes Offline\t8085\t0\t137", "4", "Небесный эльф"]:
+        raise ValueError("Realm fix changed character data or exposed unserved endpoints: " + actual)
+    if realms.configure(root, command, realm_env, 70532, print):
+        raise ValueError("A repeated catalog repair was not idempotent")
+    execute(query, env=env, input="UPDATE auth.realmlist SET flag=2 WHERE id=70;\n")
+    try:
+        realms.configure(root, command, realm_env, 70532, print)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("Catalog repair incorrectly forced an offline world online")
+    print("PASS: only Normal realm 70 is advertised, extra rows retained, characters unchanged and offline state respected")
 
 
 def execute(command, **kwargs):
@@ -122,8 +148,10 @@ def main():
             entrypoint=["openssl"], command=["s_server", "-nocert", "-www", "-accept", "0.0.0.0:8085"])
         probe["services"]["bnetserver"].update(
             entrypoint=["bash", "-c"],
-            command=["openssl s_server -nocert -www -accept 0.0.0.0:1119 >/dev/null 2>&1 & "
-                     "exec openssl s_server -nocert -www -accept 0.0.0.0:8081"])
+            command=["openssl s_server -cert /opt/trinitycore/certs/forever.cert.pem "
+                     "-key /opt/trinitycore/certs/forever.key.pem -www -accept 0.0.0.0:1119 >/dev/null 2>&1 & "
+                     "exec openssl s_server -cert /opt/trinitycore/certs/forever.cert.pem "
+                     "-key /opt/trinitycore/certs/forever.key.pem -www -accept 0.0.0.0:8081"])
         legacy = copy.deepcopy(probe)
         legacy["networks"]["local"]["internal"] = True
         def probe_command(config, name):
@@ -157,6 +185,8 @@ def main():
             if offline.internal_network(compose):
                 raise ValueError("Network migration kept the internal flag")
             print("PASS: all three localhost ports and migration from the legacy internal network")
+            realms.wait_tls(root)
+            print("PASS: both local TLS ports verify against the generated CA and actual certificate hostname")
             execute(compose + ["stop", "mysql"], env=env)
             execute(start, env=env)
             text = execute(query, env=env, input="SELECT value FROM characters.hoa_ci_persistence WHERE id=1;\n")

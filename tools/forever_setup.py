@@ -17,7 +17,7 @@ from distribution import installer, runtime
 class Launcher:
     def __init__(self, window):
         self.window = window
-        window.title("Hordes Forever — локальная игра")
+        window.title("Hordes Forever 0.2.0-preview.2 — локальная игра")
         window.geometry("850x720")
         window.minsize(700, 620)
         self.events = queue.Queue()
@@ -191,7 +191,7 @@ class Launcher:
         if self.native is not None and self.native.poll() is None:
             raise ValueError("Игровой лаунчер уже открыт")
         version, manifest = self.installed()
-        self.native = runtime.launch(self.root, version, manifest, self.client_path)
+        self.native = runtime.launch(self.root, version, manifest, self.client_path, self.progress)
         self.progress("Открыт игровой лаунчер. При первом запуске нажмите «Подготовить ПК» и войдите "
                       "с локальным аккаунтом. Игровая проверка этой сборки ещё не выполнена.")
         if manifest.get("modeProtocol") == 1:
