@@ -3,6 +3,8 @@ name: Publish Hordes survivor test build
 on:
   push:
     tags: ['survivor-v*']
+    branches: [main]
+    paths: ['.github/workflows/survivor-release.yml']
   workflow_dispatch:
     inputs:
       version:
@@ -36,6 +38,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           version="${INPUT_VERSION:-${GITHUB_REF_NAME#survivor-v}}"
+          if [[ "$version" == main ]]; then version=0.2.0-preview.1; fi
           [[ "$version" =~ ^[0-9][A-Za-z0-9._-]{0,60}$ ]] || exit 1
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=offline-v$version" >> "$GITHUB_OUTPUT"
@@ -58,7 +61,15 @@ jobs:
       - name: Test and rebuild the installer with current runtime configuration
         shell: bash
         run: |
-          python -m unittest discover -s tools/tests -p 'test_*.py' -v
+          python - <<'PY'
+          import subprocess, sys
+          result = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_*.py', '-v'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+          print(result.stdout)
+          if result.returncode:
+              tail=result.stdout[-3500:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+              print('::error title=Windows packaging checks::'+tail)
+              sys.exit(result.returncode)
+          PY
           python -m pip install pyinstaller==6.16.0
           python -m PyInstaller --noconfirm --clean --onefile --windowed --name HordesForeverSetup --paths tools --add-data 'config/offline:config/offline' --add-data 'tools/distribution/certgen.sh:distribution' tools/forever_setup.py
           mkdir -p output
