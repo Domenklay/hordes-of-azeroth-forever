@@ -71,7 +71,7 @@ class OfflineTests(unittest.TestCase):
             settings, env, command = offline.configuration(self.state)
         self.assertNotIn("COMPOSE_FILE", env)
         self.assertNotIn("COMPOSE_PROFILES", env)
-        self.assertEqual(env["HOA_DATA"], str(self.data))
+        self.assertEqual(Path(env["HOA_DATA"]).resolve(), self.data.resolve())
         self.assertEqual(settings["build"], 70532)
         self.assertEqual(command, offline.configuration(self.state)[2])
         self.assertIn(os.devnull, command)
@@ -178,7 +178,7 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(world["environment"]["CLIENT_BUILD"], "70532")
         self.assertNotIn("MYSQL_ROOT_PASSWORD", world["environment"])
         data_mount = next(v for v in world["volumes"] if v["target"] == "/opt/trinitycore/data")
-        self.assertEqual(data_mount["source"], str(self.data))
+        self.assertEqual(Path(data_mount["source"]).resolve(), self.data.resolve())
         self.assertTrue(data_mount["read_only"])
         # Compose omits false fields when normalizing; also inspect the source
         # so an accidentally removed explicit safeguard cannot pass this check.
