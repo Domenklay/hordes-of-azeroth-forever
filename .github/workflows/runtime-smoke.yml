@@ -1,0 +1,32 @@
+name: Test packaged offline engine
+
+on:
+  workflow_run:
+    workflows: ['Offline launcher and engine']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: 'Successful engine artifact run ID'
+        default: '41821807853'
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+          path: packaged
+          run-id: ${{ inputs.build_run || github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Check binaries, local certificates and database persistence
+        run: python3 tools/distribution/smoke_runtime.py --directory packaged
