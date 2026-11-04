@@ -131,6 +131,10 @@ def launch(root, version, manifest, client):
     validate_client(client, manifest["clientBuild"])
     require_ready(root)
     if manifest.get("modeProtocol") == 1:
+        saved, _, _ = offline.configuration(root / "profile")
+        expected = next(p["image"] for p in manifest["packages"] if p["id"] == "core")
+        if saved["core_image"] != expected:
+            raise ValueError("Сначала нажмите «Запустить локальный движок», чтобы обновить его до вампирлайка.")
         survivor.install_addon(version, client)
     native = version / "game-launcher" / "forever-launcher.exe"
     if not native.is_file():
