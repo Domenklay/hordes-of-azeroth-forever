@@ -1,0 +1,33 @@
+name: Test launcher log layout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/forever_setup.py'
+      - 'tools/tests/test_launcher_gui.py'
+      - '.github/workflows/launcher-layout.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  geometry:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Show a large log and copy it in the actual Windows UI
+        shell: python
+        run: |
+          import subprocess,sys
+          result=subprocess.run([sys.executable,'-m','unittest','discover','-s','tools/tests','-p','test_launcher_gui.py','-v'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+          print(result.stdout)
+          if result.returncode:
+              detail=result.stdout[-3500:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+              print('::error title=Windows log layout::'+detail)
+              sys.exit(result.returncode)

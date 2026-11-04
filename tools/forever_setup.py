@@ -34,6 +34,24 @@ class Launcher:
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="Hordes of Azeroth Forever", font=("Segoe UI", 20)).pack(anchor="w")
         ttk.Label(frame, text="Одиночный прототип • волны, автоатаки и выбор улучшений").pack(anchor="w", pady=(0, 12))
+        # Allocate the footer before the expanding content. Long logs must
+        # never push copy/help controls outside the visible client area.
+        footer = ttk.Frame(frame)
+        footer.pack(side="bottom", fill="x", pady=(8, 0))
+        self.copy_button = ttk.Button(footer, text="Скопировать журнал", command=self.copy_log)
+        self.copy_button.pack(side="right")
+        ttk.Button(footer, text="Инструкция / Docker Desktop", command=lambda: webbrowser.open(
+            "https://github.com/" + installer.REPOSITORY + "/blob/main/config/offline/LAUNCHER.ru.md")).pack(side="left")
+        status_label = ttk.Label(frame, textvariable=self.status, wraplength=780)
+        status_label.pack(side="bottom", fill="x", pady=(8, 0))
+        frame.bind("<Configure>", lambda event: status_label.configure(wraplength=max(300, event.width)))
+        self.notebook = ttk.Notebook(frame)
+        self.notebook.pack(fill="both", expand=True)
+        controls = ttk.Frame(self.notebook, padding=(0, 8))
+        self.logs_page = ttk.Frame(self.notebook, padding=(0, 8))
+        self.notebook.add(controls, text="Игра и установка")
+        self.notebook.add(self.logs_page, text="Журнал")
+        frame = controls
         ttk.Label(frame, text="Клиент Forever: корневая папка с Data и _classic_beta_").pack(anchor="w")
         row = ttk.Frame(frame)
         row.pack(fill="x", pady=5)
@@ -56,12 +74,16 @@ class Launcher:
             button = ttk.Button(frame, text=label, command=lambda cb=callback: self.work(cb))
             button.pack(fill="x", pady=3)
             self.buttons.append(button)
-        ttk.Label(frame, textvariable=self.status, wraplength=780).pack(anchor="w", pady=8)
-        self.log = tk.Text(frame, height=8, wrap="word", state="disabled")
-        self.log.pack(fill="both", expand=True)
-        ttk.Button(frame, text="Скопировать журнал", command=self.copy_log).pack(anchor="e", pady=4)
-        ttk.Button(frame, text="Инструкция / Docker Desktop", command=lambda: webbrowser.open(
-            "https://github.com/" + installer.REPOSITORY + "/blob/main/config/offline/LAUNCHER.ru.md")).pack(pady=4)
+        self.logs_page.rowconfigure(1, weight=1)
+        self.logs_page.columnconfigure(0, weight=1)
+        refresh = ttk.Button(self.logs_page, text="Обновить журнал движка", command=lambda: self.work(self.logs))
+        refresh.grid(row=0, column=0, sticky="w", pady=(0, 8))
+        self.buttons.append(refresh)
+        self.log = tk.Text(self.logs_page, height=8, wrap="word", state="disabled")
+        self.log.grid(row=1, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(self.logs_page, orient="vertical", command=self.log.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        self.log.configure(yscrollcommand=scrollbar.set)
         window.after(150, self.poll)
         window.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -125,11 +147,16 @@ class Launcher:
                         self.vendor = subprocess.Popen([filename], cwd=Path(filename).parent)
                         self.progress("После загрузки клиента закройте официальный лаунчер и выберите папку клиента здесь.")
                 else:
-                    self.status.set(text)
+                    # Keep the full output in the text widget. A Label that
+                    # contains hundreds of lines changes the whole layout.
+                    first_line = next((line for line in text.splitlines() if line.strip()), "")
+                    self.status.set("Журнал движка обновлён." if kind == "engine_log" else first_line[:180])
                     self.log.configure(state="normal")
                     self.log.insert("end", ("Ошибка: " if kind == "error" else "") + text + "\n")
                     self.log.see("end")
                     self.log.configure(state="disabled")
+                    if kind in ("engine_log", "error"):
+                        self.notebook.select(self.logs_page)
         except queue.Empty:
             pass
         self.window.after(150, self.poll)
@@ -183,7 +210,7 @@ class Launcher:
         report = runtime.status(self.root)
         self.progress(report["message"] + "\n" + report["details"])
         if report["failed"]:
-            self.progress(runtime.engine(self.root, "logs"))
+            self.events.put(("engine_log", runtime.engine(self.root, "logs")))
 
     def play(self):
         if self.client_path is None:
@@ -210,7 +237,7 @@ class Launcher:
         self.progress("Движок остановлен; база и персонажи сохранены.")
 
     def logs(self):
-        self.progress(runtime.engine(self.root, "logs"))
+        self.events.put(("engine_log", runtime.engine(self.root, "logs")))
 
     def close(self):
         if self.busy:
