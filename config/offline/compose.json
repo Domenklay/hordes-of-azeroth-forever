@@ -1,0 +1,65 @@
+{
+  "services": {
+    "mysql": {
+      "image": "${HOA_MYSQL_IMAGE}",
+      "pull_policy": "never",
+      "restart": "no",
+      "networks": ["local"],
+      "env_file": ["${HOA_STATE}/mysql.env"],
+      "command": ["--max-allowed-packet=1G", "--skip-log-bin", "--innodb-buffer-pool-size=256M", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"],
+      "volumes": [
+        "saves:/var/lib/mysql",
+        {"type": "bind", "source": "${HOA_CONFIG}/mysql-init", "target": "/docker-entrypoint-initdb.d", "read_only": true, "bind": {"create_host_path": false}}
+      ],
+      "healthcheck": {
+        "test": ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 -uroot --silent"],
+        "interval": "5s", "timeout": "5s", "retries": 60, "start_period": "30s"
+      }
+    },
+    "worldserver": {
+      "image": "${HOA_CORE_IMAGE}",
+      "pull_policy": "never",
+      "restart": "no",
+      "command": ["worldserver"],
+      "networks": ["local"],
+      "env_file": ["${HOA_STATE}/database.env"],
+      "environment": {
+        "DB_HOST": "mysql", "DB_USER": "trinity", "DB_PORT": "3306",
+        "CLIENT_BUILD": "${HOA_CLIENT_BUILD}", "MMAP_PATHFINDING": "0",
+        "SOAP_ENABLED": "0", "PACKET_LOG": "0", "SUBCLASS_ENABLED": "0", "SUBCLASS_FREEPICK": "0"
+      },
+      "depends_on": {"mysql": {"condition": "service_healthy"}},
+      "stdin_open": true, "tty": true, "stop_grace_period": "2m",
+      "ports": ["127.0.0.1:8085:8085"],
+      "volumes": [
+        {"type": "bind", "source": "${HOA_DATA}", "target": "/opt/trinitycore/data", "read_only": true, "bind": {"create_host_path": false}},
+        {"type": "bind", "source": "${HOA_CONFIG}/overrides", "target": "/opt/trinitycore/overrides", "read_only": true, "bind": {"create_host_path": false}},
+        "logs:/opt/trinitycore/logs"
+      ]
+    },
+    "bnetserver": {
+      "image": "${HOA_CORE_IMAGE}",
+      "pull_policy": "never",
+      "restart": "no",
+      "command": ["bnetserver"],
+      "networks": ["local"],
+      "env_file": ["${HOA_STATE}/database.env"],
+      "environment": {
+        "DB_HOST": "mysql", "DB_USER": "trinity", "DB_PORT": "3306",
+        "PUBLIC_ADDRESS": "127.0.0.1", "REALM_LOCAL_ADDRESS": "127.0.0.1",
+        "REALM_NAME": "Hordes Offline"
+      },
+      "extra_hosts": ["trinity.actual.battle.net:127.0.0.1"],
+      "depends_on": {"mysql": {"condition": "service_healthy"}, "worldserver": {"condition": "service_started"}},
+      "ports": ["127.0.0.1:1119:1119", "127.0.0.1:8081:8081"],
+      "stop_grace_period": "30s",
+      "volumes": [
+        {"type": "bind", "source": "${HOA_CERTS}", "target": "/opt/trinitycore/certs", "read_only": true, "bind": {"create_host_path": false}},
+        {"type": "bind", "source": "${HOA_CONFIG}/overrides", "target": "/opt/trinitycore/overrides", "read_only": true, "bind": {"create_host_path": false}},
+        "logs:/opt/trinitycore/logs"
+      ]
+    }
+  },
+  "networks": {"local": {"internal": true}},
+  "volumes": {"saves": {}, "logs": {}}
+}
