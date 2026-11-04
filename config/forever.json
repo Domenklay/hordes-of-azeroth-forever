@@ -12,6 +12,7 @@
     "referenceCommit": "a7e7747778042b537d062f019bbf2465d67a2863",
     "documentedClientBuild": 70450,
     "userExperimentalClientBuild": 70532,
+    "offlineLauncherClientBuild": 70532,
     "interfaceVersion": 16001,
     "coreRepository": "advocaite/TrinityCore",
     "coreBranch": "forever",

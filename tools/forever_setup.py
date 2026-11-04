@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Russian Windows bootstrapper; PyInstaller bundles Python and Tk."""
+import json
+import os
+from pathlib import Path
+import queue
+import subprocess
+import sys
+import threading
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+import webbrowser
+
+from distribution import installer, runtime
+
+
+class Launcher:
+    def __init__(self, window):
+        self.window = window
+        window.title("Hordes Forever — локальная игра")
+        window.geometry("850x640")
+        window.minsize(700, 560)
+        self.events = queue.Queue()
+        self.busy = False
+        self.native = None
+        self.vendor = None
+        self.root = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "HordesForever"
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.settings_path = self.root / "launcher.json"
+        self.settings = json.loads(self.settings_path.read_text(encoding="utf-8")) if self.settings_path.exists() else {}
+        self.client = tk.StringVar(value=self.settings.get("client", ""))
+        self.status = tk.StringVar(value="Первичная настройка требует интернета. Затем запускайте локально.")
+        frame = ttk.Frame(window, padding=20)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Hordes of Azeroth Forever", font=("Segoe UI", 20)).pack(anchor="w")
+        ttk.Label(frame, text="Предварительная версия • режим Hordes ещё переносится").pack(anchor="w", pady=(0, 12))
+        ttk.Label(frame, text="Клиент Forever: корневая папка с Data и _classic_beta_").pack(anchor="w")
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=5)
+        ttk.Entry(row, textvariable=self.client).pack(side="left", fill="x", expand=True)
+        ttk.Button(row, text="Выбрать…", command=self.choose_client).pack(side="left", padx=5)
+        self.include_client = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Скачать клиент из нашего релиза, если архив опубликован",
+                        variable=self.include_client).pack(anchor="w")
+        self.buttons = []
+        for label, callback in [
+            ("Установить компоненты из нашего GitHub", self.install),
+            ("Скачать клиент через ForeverBetaLauncher.exe…", self.official),
+            ("Запустить локальный движок", self.start),
+            ("Войти в игру", self.play),
+            ("Создать аккаунт / открыть консоль", self.account),
+            ("Остановить локальный движок", self.stop),
+            ("Журнал движка", self.logs),
+        ]:
+            button = ttk.Button(frame, text=label, command=lambda cb=callback: self.work(cb))
+            button.pack(fill="x", pady=3)
+            self.buttons.append(button)
+        ttk.Label(frame, textvariable=self.status, wraplength=780).pack(anchor="w", pady=8)
+        self.log = tk.Text(frame, height=8, wrap="word", state="disabled")
+        self.log.pack(fill="both", expand=True)
+        ttk.Button(frame, text="Инструкция / Docker Desktop", command=lambda: webbrowser.open(
+            "https://github.com/" + installer.REPOSITORY + "/blob/main/config/offline/LAUNCHER.ru.md")).pack(pady=4)
+        window.after(150, self.poll)
+        window.protocol("WM_DELETE_WINDOW", self.close)
+
+    def choose_client(self):
+        folder = filedialog.askdirectory(title="Корень клиента Forever (Data и .build.info)")
+        if folder:
+            self.client.set(folder)
+
+    def save_client(self, client):
+        self.settings["client"] = str(client)
+        self.settings_path.write_text(json.dumps(self.settings, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def progress(self, text):
+        self.events.put(("log", text))
+
+    def work(self, callback):
+        if self.busy:
+            return
+        # Tk variables must be read on the UI thread, before starting workers.
+        self.client_path = Path(self.client.get()).resolve() if self.client.get().strip() else None
+        self.download_client = self.include_client.get()
+        self.busy = True
+        for button in self.buttons:
+            button.state(["disabled"])
+        def worker():
+            try:
+                callback()
+            except Exception as error:
+                self.events.put(("error", str(error)))
+            finally:
+                self.events.put(("done", ""))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def poll(self):
+        try:
+            while True:
+                kind, text = self.events.get_nowait()
+                if kind == "done":
+                    self.busy = False
+                    for button in self.buttons:
+                        button.state(["!disabled"])
+                elif kind == "client":
+                    self.client.set(text)
+                elif kind == "official":
+                    filename = filedialog.askopenfilename(title="Ваш официальный ForeverBetaLauncher.exe",
+                                                         filetypes=[("Forever Beta Launcher", "*.exe")])
+                    if filename:
+                        self.vendor = subprocess.Popen([filename], cwd=Path(filename).parent)
+                        self.progress("После загрузки клиента закройте официальный лаунчер и выберите папку клиента здесь.")
+                else:
+                    self.status.set(text)
+                    self.log.configure(state="normal")
+                    self.log.insert("end", ("Ошибка: " if kind == "error" else "") + text + "\n")
+                    self.log.see("end")
+                    self.log.configure(state="disabled")
+        except queue.Empty:
+            pass
+        self.window.after(150, self.poll)
+
+    def installed(self):
+        current = self.root / "current.json"
+        if not current.is_file():
+            raise ValueError("Сначала установите компоненты из GitHub")
+        manifest = installer.validate_manifest(json.loads(current.read_text(encoding="utf-8")))
+        return self.root / "packages" / manifest["version"], manifest
+
+    def install(self):
+        if self.native is not None and self.native.poll() is None:
+            raise ValueError("Сначала закройте игру и игровой лаунчер")
+        subprocess.run(["docker", "info", "--format", "{{.OSType}}"], check=True, capture_output=True)
+        self.progress("Чтение нашего релиза…")
+        try:
+            manifest = installer.fetch_manifest()
+        except Exception as error:
+            raise ValueError("Не удалось получить offline-manifest.json. Проверьте интернет; "
+                             "возможно, сборка пакетов в GitHub Actions ещё не завершена.") from error
+        installer.install(manifest, self.root, self.download_client, self.progress)
+        if self.download_client:
+            package = next(p for p in manifest["packages"] if p["kind"] == "client")
+            client = self.root / "packages" / manifest["version"] / package["id"]
+            self.save_client(client)
+            self.events.put(("client", str(client)))
+        # Activate only after complete installation. Keep the previous version.
+        temporary = self.root / "current.tmp"
+        temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, self.root / "current.json")
+        self.progress("Компоненты установлены. Выберите клиент и запустите локальный движок.")
+
+    def official(self):
+        # Choose the existing vendor launcher; never reinterpret its
+        # signed release metadata or fetch unverified game chunks ourselves.
+        self.events.put(("official", ""))
+
+    def start(self):
+        if self.vendor is not None and self.vendor.poll() is None:
+            raise ValueError("Дождитесь окончания обновления и закройте официальный лаунчер")
+        if self.client_path is None:
+            raise ValueError("Выберите папку клиента или скачайте его официальным лаунчером")
+        version, manifest = self.installed()
+        runtime.prepare(self.root, version, manifest, self.client_path, self.progress)
+        self.save_client(self.client_path)
+        runtime.engine(self.root, "start")
+        self.progress("Движок запускается. Первый импорт базы долгий: не останавливайте его. "
+                      "Готовность проверьте в журнале, затем нажмите «Войти в игру».")
+
+    def play(self):
+        if self.client_path is None:
+            raise ValueError("Выберите папку клиента")
+        if self.native is not None and self.native.poll() is None:
+            raise ValueError("Игровой лаунчер уже открыт")
+        version, manifest = self.installed()
+        self.native = runtime.launch(self.root, version, manifest, self.client_path)
+        self.progress("Открыт игровой лаунчер. При первом запуске нажмите «Подготовить ПК» и войдите "
+                      "с локальным аккаунтом. Игровая проверка этой сборки ещё не выполнена.")
+
+    def account(self):
+        runtime.console(self.root)
+        self.progress("В консоли: bnetaccount create ваш@email ваш_пароль. "
+                      "Не прерывайте первый импорт. Отсоединение без остановки: Ctrl+P, Ctrl+Q.")
+
+    def stop(self):
+        if self.native is not None and self.native.poll() is None:
+            raise ValueError("Сначала выйдите из игры и закройте игровой лаунчер")
+        runtime.engine(self.root, "stop")
+        self.progress("Движок остановлен; база и персонажи сохранены.")
+
+    def logs(self):
+        self.progress(runtime.engine(self.root, "logs"))
+
+    def close(self):
+        if self.busy:
+            messagebox.showinfo("Выполняется операция", "Дождитесь завершения установки или подготовки данных.")
+            return
+        if self.native is not None and self.native.poll() is None:
+            messagebox.showinfo("Игра открыта", "Сначала закройте игру и игровой лаунчер.")
+            return
+        self.window.destroy()
+
+
+def main():
+    if sys.platform != "win32":
+        raise SystemExit("Этот установщик предназначен для Windows x64 с Docker Desktop (Linux containers).")
+    window = tk.Tk()
+    # Avoid two installers sharing a cache, profile or extraction directory.
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel.CreateMutexW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.CreateMutexW(None, False, "Local\\HordesForeverSetup")
+    if not handle:
+        raise OSError(ctypes.get_last_error(), "Не удалось создать блокировку установщика")
+    if ctypes.get_last_error() == 183:
+        messagebox.showinfo("Установщик уже открыт", "Используйте открытое окно Hordes Forever.")
+        kernel.CloseHandle(handle)
+        window.destroy()
+        return
+    try:
+        Launcher(window)
+        window.mainloop()
+    finally:
+        kernel.CloseHandle(handle)
+
+
+if __name__ == "__main__":
+    main()

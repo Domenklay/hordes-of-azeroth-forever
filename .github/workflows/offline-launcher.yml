@@ -1,0 +1,177 @@
+name: Offline launcher and engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Unique package version, e.g. 0.1.0-preview.1'
+        required: true
+        default: '0.1.0-preview.1'
+  push:
+    tags: ['offline-v*']
+
+permissions:
+  contents: read
+
+env:
+  FOREVER_REF: a7e7747778042b537d062f019bbf2465d67a2863
+  PYTHONUTF8: '1'
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#offline-v}}"
+          [[ "$version" =~ ^[0-9][A-Za-z0-9._-]{0,60}$ ]] || exit 1
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=offline-v$version" >> "$GITHUB_OUTPUT"
+
+  launcher:
+    needs: metadata
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Domenklay/WoWForEver
+          ref: ${{ env.FOREVER_REF }}
+          path: donor
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: donor/app/src-tauri
+      - name: Test packaging and adapt native launcher
+        shell: bash
+        env:
+          FOREVER_TEST_SOURCE: donor
+          MSYS_NO_PATHCONV: '1'
+        run: |
+          python -m unittest discover -s tools/tests -p 'test_distribution.py' -v
+          python tools/distribution/patch_native.py donor
+          # Build-only public fallback. Its private key is deleted and never packaged.
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=Build-only placeholder' -keyout build-only.key -out donor/app/src-tauri/resources/forever_root_ca.crt
+          rm build-only.key
+      - name: Build native login launcher
+        shell: bash
+        working-directory: donor/app
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --lib
+          npx --yes @tauri-apps/cli@2.10.0 build --no-bundle
+      - name: Build standalone Russian installer
+        shell: bash
+        run: |
+          python -m pip install pyinstaller==6.16.0
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name HordesForeverSetup --paths tools --add-data 'config/offline:config/offline' --add-data 'tools/distribution/certgen.sh:distribution' tools/forever_setup.py
+          mkdir -p output
+          cp dist/HordesForeverSetup.exe output/
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile, subprocess
+          with zipfile.ZipFile('output/game-launcher.zip','w',zipfile.ZIP_DEFLATED) as z:
+              z.write('donor/app/src-tauri/target/release/forever-launcher.exe','forever-launcher.exe')
+              z.write('donor/LICENSE','LICENSE.GPL-2.0')
+          # Corresponding source includes our modified files and the exact lockfile.
+          with zipfile.ZipFile('output/forever-login-source.zip','w',zipfile.ZIP_DEFLATED) as z:
+              for name in subprocess.check_output(['git','-C','donor','ls-files'],text=True).splitlines():
+                  path=Path('donor')/name
+                  if path.is_file(): z.write(path,name)
+              for name in ['Cargo.lock']:
+                  path=Path('donor/app/src-tauri')/name
+                  if path.is_file() and 'app/src-tauri/'+name not in z.namelist(): z.write(path,'app/src-tauri/'+name)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher
+          path: output/*
+          if-no-files-found: error
+
+  engine:
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Domenklay/WoWForEver
+          ref: ${{ env.FOREVER_REF }}
+          path: donor
+      - name: Check offline configuration
+        run: python3 -m unittest discover -s tools/tests -p 'test_offline.py' -v
+      - name: Compile pinned Forever engine and bundle its database
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          docker build --build-arg BUILD_JOBS=2 --tag "hoa-forever-core:$VERSION" donor
+          docker pull mysql:8.0
+          mkdir -p output
+          set -o pipefail
+          docker save "hoa-forever-core:$VERSION" | gzip -1 > output/core.tar.gz
+          docker save mysql:8.0 | gzip -1 > output/mysql.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine
+          path: output/*.tar.gz
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+
+  release:
+    needs: [metadata, launcher, engine]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: input
+          merge-multiple: true
+      - name: Package checked release assets
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          python3 tools/distribution/make_release.py --input input --output release --version "$VERSION" --tag "$TAG" --build 70532
+          cp input/HordesForeverSetup.exe input/forever-login-source.zip release/
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          directory=Path('release')
+          with (directory/'SHA256SUMS').open('w') as output:
+              for path in sorted(directory.iterdir()):
+                  if path.name == 'SHA256SUMS': continue
+                  with path.open('rb') as source:
+                      value=hashlib.file_digest(source,'sha256').hexdigest()
+                  output.write(f'{value}  {path.name}\n')
+          PY
+          cat > notes.md <<'EOF'
+          Preview: Russian installer and local base Forever engine for client 1.60.1.70532.
+          The Hordes game mode is not ported yet; this is not a playable Hordes release.
+          Requires Windows x64, Docker Desktop with Linux containers, and your own client.
+          No game client or extracted Blizzard data is included.
+          70532 compatibility is experimental; in-game validation is still required.
+          Source and instructions: config/offline/LAUNCHER.ru.md in the repository.
+          EOF
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          # A normal GitHub release is used so /releases/latest resolves it.
+          # The preview status remains explicit in its title, notes and UI.
+          gh release create "$TAG" --target "$GITHUB_SHA" --latest --title "Offline launcher preview $TAG" --notes-file notes.md release/*

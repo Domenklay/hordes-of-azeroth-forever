@@ -1,0 +1,90 @@
+"""Prepare the local engine and hand game login to the native Forever launcher."""
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+
+import offline
+from .installer import validate_client
+
+
+def prepare(root, version, manifest, client, progress):
+    validate_client(client, manifest["clientBuild"])
+    images = {p["id"]: p.get("image") for p in manifest["packages"]}
+    settings = {"core_image": images["core"], "mysql_image": images["mysql"]}
+    offline.require_images(settings)
+    profile = root / "profile"
+    if profile.exists():
+        saved, _, _ = offline.configuration(profile)
+        if saved["build"] != manifest["clientBuild"] or saved["core_image"] != images["core"]:
+            raise ValueError("Существующая база относится к другому движку/сборке. "
+                             "Автообновление базы отключено: нужна отдельная миграция и резервная копия.")
+        offline.check_files(Path(saved["data"]), Path(saved["certs"]))
+        return profile
+    certs = root / "certs"
+    certs.mkdir(parents=True, exist_ok=True)
+    script = Path(__file__).with_name("certgen.sh").resolve()
+    progress("Создание локальных сертификатов…")
+    subprocess.run(["docker", "run", "--rm", "--pull=never", "--network", "none",
+                    "--mount", f"type=bind,source={certs},target=/certs",
+                    "--mount", f"type=bind,source={script},target=/certgen.sh,readonly",
+                    "--entrypoint", "bash", images["core"], "/certgen.sh"], check=True)
+    data = root / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    try:
+        offline.check_files(data, certs)
+    except ValueError:
+        # Extraction may be resumed after failure, but only inside the app's
+        # dedicated output folder. The user's client is mounted read-only.
+        progress("Извлечение данных клиента. Это может занять много времени…")
+        subprocess.run(["docker", "run", "--rm", "--pull=never", "--network", "none",
+                        "--mount", f"type=bind,source={client},target=/wow,readonly",
+                        "--mount", f"type=bind,source={data},target=/opt/trinitycore/data",
+                        "--entrypoint", "/usr/local/bin/extract.sh", images["core"]], check=True)
+    offline.initialize(profile, data, certs, manifest["clientBuild"], images["core"], images["mysql"])
+    return profile
+
+
+def engine(root, operation):
+    profile = root / "profile"
+    settings, env, command = offline.configuration(profile)
+    if operation == "start":
+        offline.check_files(Path(settings["data"]), Path(settings["certs"]))
+        offline.require_images(settings)
+    args = {"start": ["up", "--detach", "--pull", "never", "--no-build"],
+            "stop": ["stop"], "logs": ["logs", "--tail", "60", "worldserver", "bnetserver"]}[operation]
+    return subprocess.run(command + args, env=env, check=True, capture_output=True, text=True).stdout
+
+
+def console(root):
+    _, env, command = offline.configuration(root / "profile")
+    return subprocess.Popen(command + ["attach", "--sig-proxy=false", "worldserver"], env=env,
+                            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+
+
+def launch(root, version, manifest, client):
+    validate_client(client, manifest["clientBuild"])
+    for port in (1119, 8081, 8085):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=2):
+                pass
+        except OSError as error:
+            raise ValueError("Движок ещё не принимает подключения. Дождитесь импорта базы, "
+                             "проверьте журнал и нажмите «Войти в игру» ещё раз.") from error
+    native = version / "game-launcher" / "forever-launcher.exe"
+    if not native.is_file():
+        raise ValueError("Не установлен игровой лаунчер")
+    native_config = root / "game-settings"
+    native_config.mkdir(parents=True, exist_ok=True)
+    settings_file = native_config / "settings.json"
+    settings = json.loads(settings_file.read_text(encoding="utf-8")) if settings_file.is_file() else {}
+    settings.update(gameDir=str(client / "_classic_beta_"), locale="ruRU", language="ru",
+                    server={"name": "Hordes Offline", "portal": "trinity.actual.battle.net",
+                            "address": "127.0.0.1", "bnetPort": 1119, "restPort": 8081,
+                            "worldPort": 8085, "regionGroup": 8, "website": "",
+                            "publicKey": "02596F0D0C061A8B30745988FD72C59E29EC367FB0F341F28E0F08D037BAFC69"})
+    settings_file.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+    env = dict(os.environ, HOA_NATIVE_CONFIG=str(native_config),
+               HOA_LOCAL_CA=str(root / "certs/ca/forever_root_ca.crt"))
+    return subprocess.Popen([str(native)], cwd=native.parent, env=env)

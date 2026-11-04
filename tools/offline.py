@@ -9,7 +9,7 @@ import secrets
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 CONFIG = ROOT / "config" / "offline"
 
 
@@ -39,14 +39,14 @@ def initialize(state, data, certs, build, image, mysql_image):
             f.write(contents)
     settings = {"data": str(data), "certs": str(certs), "build": build,
                 "core_image": image, "mysql_image": mysql_image}
-    (state / "settings.json").write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
+    (state / "settings.json").write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Локальный профиль сохранён: {state}. Пароли сгенерированы, игровые файлы не изменены.")
 
 
 def configuration(state):
     if not (state / "settings.json").is_file():
         raise ValueError("Локальный профиль не создан. Сначала выполните init --data ... --certs ...")
-    settings = json.loads((state / "settings.json").read_text())
+    settings = json.loads((state / "settings.json").read_text(encoding="utf-8"))
     # Do not inherit arbitrary Compose overrides, profiles or a second env file.
     env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "HOA_"))}
     env.update(HOA_STATE=str(state), HOA_CONFIG=str(CONFIG), HOA_DATA=settings["data"],
