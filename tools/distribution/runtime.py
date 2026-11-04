@@ -7,6 +7,7 @@ import subprocess
 
 import offline
 from .installer import validate_client
+from . import survivor
 
 SERVICES = {"mysql": "База", "worldserver": "Игровой мир", "bnetserver": "Авторизация"}
 
@@ -80,8 +81,7 @@ def prepare(root, version, manifest, client, progress):
     if profile.exists():
         saved, _, _ = offline.configuration(profile)
         if saved["build"] != manifest["clientBuild"] or saved["core_image"] != images["core"]:
-            raise ValueError("Существующая база относится к другому движку/сборке. "
-                             "Автообновление базы отключено: нужна отдельная миграция и резервная копия.")
+            survivor.upgrade(root, saved, manifest, images["core"], progress)
         offline.check_files(Path(saved["data"]), Path(saved["certs"]))
         return profile
     certs = root / "certs"
@@ -130,6 +130,8 @@ def console(root):
 def launch(root, version, manifest, client):
     validate_client(client, manifest["clientBuild"])
     require_ready(root)
+    if manifest.get("modeProtocol") == 1:
+        survivor.install_addon(version, client)
     native = version / "game-launcher" / "forever-launcher.exe"
     if not native.is_file():
         raise ValueError("Не установлен игровой лаунчер")

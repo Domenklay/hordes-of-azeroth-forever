@@ -1,0 +1,149 @@
+name: Publish Hordes survivor test build
+
+on:
+  push:
+    tags: ['survivor-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Unique installer patch version'
+        required: true
+        default: '0.2.0-preview.1'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN: '41821807853'
+  CORE_IMAGE: 'hoa-forever-core:0.2.0-preview.1'
+  MODE_RUN: '41851702265'
+  PYTHONUTF8: '1'
+
+concurrency:
+  group: survivor-release
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#survivor-v}}"
+          [[ "$version" =~ ^[0-9][A-Za-z0-9._-]{0,60}$ ]] || exit 1
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=offline-v$version" >> "$GITHUB_OUTPUT"
+
+  installer:
+    needs: metadata
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: launcher
+          path: input
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+      - name: Test and rebuild the installer with current runtime configuration
+        shell: bash
+        run: |
+          python -m unittest discover -s tools/tests -p 'test_*.py' -v
+          python -m pip install pyinstaller==6.16.0
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name HordesForeverSetup --paths tools --add-data 'config/offline:config/offline' --add-data 'tools/distribution/certgen.sh:distribution' tools/forever_setup.py
+          mkdir -p output
+          cp dist/HordesForeverSetup.exe input/game-launcher.zip input/forever-login-source.zip output/
+      - name: Open both packaged Windows applications
+        shell: pwsh
+        run: ./tools/distribution/smoke-windows.ps1 -PackageDirectory output
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patched-launcher
+          path: output/*
+          if-no-files-found: error
+
+  publish:
+    needs: [metadata, installer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+          path: input
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: hordes-engine
+          path: input
+          run-id: ${{ env.MODE_RUN }}
+          github-token: ${{ github.token }}
+      - name: Validate the packaged engine source matches this release
+        run: |
+          git fetch --depth=1 origin eb15a950510f1d3526d65003cfbfbcc2d8fe7aa6
+          git diff --exit-code FETCH_HEAD -- mods/hordes-forever/server mods/hordes-forever/sql
+      - uses: actions/download-artifact@v4
+        with:
+          name: patched-launcher
+          path: input
+      - name: Test the exact runtime configuration before publishing
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends lua5.1
+          g++ -std=c++20 -O2 -Wall -Wextra -pedantic tools/tests/hordes_rules.cpp -o /tmp/hordes-rules
+          /tmp/hordes-rules
+          lua5.1 tools/tests/hordes_addon.lua
+          python3 tools/distribution/smoke_runtime.py --directory input --survivor
+      - name: Prepare release assets
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          python3 tools/distribution/make_release.py --input input --output release --version "$VERSION" --tag "$TAG" --build 70532 --core-image "$CORE_IMAGE" --survivor
+          cp input/HordesForeverSetup.exe input/forever-login-source.zip release/
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          directory=Path('release')
+          with (directory/'SHA256SUMS').open('w') as output:
+              for path in sorted(directory.iterdir()):
+                  if path.name == 'SHA256SUMS': continue
+                  with path.open('rb') as source:
+                      value=hashlib.file_digest(source,'sha256').hexdigest()
+                  output.write(f'{value}  {path.name}\n')
+          PY
+          cat > notes.md <<'EOF'
+          Первый одиночный прототип вампирлайка для Forever 1.60.1.70532.
+          12 волн на арене Гурубаши, автоматические атаки, 6 улучшений на выбор, финальный босс и сохранение рекорда.
+          После входа персонажем нажмите «Начать забег» в русском меню Hordes; открыть меню вручную: /hordes.
+          Обновление: закройте игру, установите компоненты и запустите движок новым HordesForeverSetup.exe.
+          Для перехода с preview.5 автоматически создаётся локальная копия auth/characters; том базы не удаляется.
+          Другие дополнения сохраняются; предыдущая папка нашего аддона при изменении остаётся рядом как backup.
+          Собран движок и проверены Windows-окна, SQL, база, резервная копия и локальные порты.
+          Полный забег на настоящем клиенте ещё не проверен. Это первый прототип, не полный перенос исходного Hordes.
+          Требуются Docker Desktop (Linux containers) и собственный клиент. Клиент и игровые данные не распространяются.
+          Инструкция: config/offline/LAUNCHER.ru.md; сценарий проверки: config/offline/SURVIVOR.ru.md.
+          EOF
+      - name: Publish after all validation succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Hordes Forever — вампирлайк, первый прототип" --notes-file notes.md release/*
+          gh release edit "$TAG" --draft=false --latest
+          gh release edit offline-v0.1.0-preview.2 --prerelease --latest=false --title "Superseded: MySQL first-start issue (use preview.3 or newer)"

@@ -38,7 +38,7 @@ def validate_manifest(manifest):
         if not re.fullmatch(r"[a-z][a-z0-9-]{0,50}", identity) or identity in ids:
             raise ValueError("Повторяющийся или некорректный идентификатор пакета")
         ids.add(identity)
-        if package.get("kind") not in ("docker-image", "native-launcher", "client"):
+        if package.get("kind") not in ("docker-image", "native-launcher", "client", "addon"):
             raise ValueError("Неизвестный тип пакета")
         if package["kind"] == "docker-image" and not re.fullmatch(r"[a-z0-9./:_-]+", package.get("image", "")):
             raise ValueError("Некорректное имя Docker-образа")
@@ -56,6 +56,9 @@ def validate_manifest(manifest):
     for package in packages:
         if package["id"] in expected and package["kind"] != expected[package["id"]]:
             raise ValueError("Тип обязательного пакета не соответствует его назначению")
+    if manifest.get("modeProtocol") is not None:
+        if manifest["modeProtocol"] != 1 or not any(p["id"] == "hordes-addon" and p["kind"] == "addon" for p in packages):
+            raise ValueError("Пакет режима не содержит совместимый интерфейс Hordes")
     return manifest
 
 
@@ -170,6 +173,8 @@ def install(manifest, root, include_client, progress=print):
                     raise ValueError("В пакете отсутствует forever-launcher.exe")
                 if package["kind"] == "client":
                     validate_client(destination, manifest["clientBuild"])
+                if package["kind"] == "addon" and not (destination / "HordesForever/HordesForever.toc").is_file():
+                    raise ValueError("В пакете отсутствует аддон HordesForever")
             archive.unlink()
         (stage / "installed.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         # Never overlay an existing installation, client, configuration or saves.

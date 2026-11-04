@@ -33,7 +33,7 @@ class Launcher:
         frame = ttk.Frame(window, padding=20)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="Hordes of Azeroth Forever", font=("Segoe UI", 20)).pack(anchor="w")
-        ttk.Label(frame, text="Предварительная версия • режим Hordes ещё переносится").pack(anchor="w", pady=(0, 12))
+        ttk.Label(frame, text="Одиночный прототип • волны, автоатаки и выбор улучшений").pack(anchor="w", pady=(0, 12))
         ttk.Label(frame, text="Клиент Forever: корневая папка с Data и _classic_beta_").pack(anchor="w")
         row = ttk.Frame(frame)
         row.pack(fill="x", pady=5)
@@ -194,6 +194,9 @@ class Launcher:
         self.native = runtime.launch(self.root, version, manifest, self.client_path)
         self.progress("Открыт игровой лаунчер. При первом запуске нажмите «Подготовить ПК» и войдите "
                       "с локальным аккаунтом. Игровая проверка этой сборки ещё не выполнена.")
+        if manifest.get("modeProtocol") == 1:
+            self.progress("После входа персонажем откроется меню Hordes: нажмите «Начать забег». "
+                          "Открыть меню повторно: /hordes. Управление WASD, атаки автоматические.")
 
     def account(self):
         runtime.console(self.root)

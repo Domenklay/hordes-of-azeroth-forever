@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import zipfile
 
 from installer import REPOSITORY, validate_manifest
 
@@ -47,6 +48,7 @@ def main():
     parser.add_argument("--tag", required=True)
     parser.add_argument("--build", type=int, choices=(70450, 70532), default=70532)
     parser.add_argument("--core-image", help="Reuse the exact image tag from an earlier, unchanged engine build")
+    parser.add_argument("--survivor", action="store_true", help="Package the first actual survivor mode")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", args.tag):
         parser.error("Invalid release tag")
@@ -58,6 +60,15 @@ def main():
         package(args.input / "mysql.tar.gz", "mysql", "docker-image", args.output, args.tag, "mysql:8.0"),
         package(args.input / "game-launcher.zip", "game-launcher", "native-launcher", args.output, args.tag),
     ]}
+    if args.survivor:
+        manifest.update(status="survivor-solo-prototype", modeProtocol=1)
+        addon = args.input / "hordes-addon.zip"
+        source = Path(__file__).resolve().parents[2] / "mods/hordes-forever/addon"
+        with zipfile.ZipFile(addon, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(source.rglob("*")):
+                if path.is_file():
+                    archive.write(path, str(path.relative_to(source)))
+        manifest["packages"].append(package(addon, "hordes-addon", "addon", args.output, args.tag))
     validate_manifest(manifest)
     (args.output / "offline-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 

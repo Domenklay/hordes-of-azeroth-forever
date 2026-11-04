@@ -2,6 +2,7 @@
 """CI-only smoke test of the packaged engine. Never claims a game-client test."""
 import argparse
 import copy
+import gzip
 import json
 import os
 import re
@@ -13,6 +14,46 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import offline
 from distribution import runtime
+from distribution import survivor
+
+
+def test_survivor_sql(image, query, env, root, state):
+    def embedded(path):
+        return execute(["docker", "run", "--rm", "--network", "none", "--entrypoint", "cat", image,
+                        "/src/TrinityCore/sql/" + path])
+    schema = embedded("base/dev/world_database.sql")
+    sql = "USE world;\n"
+    for table in ("creature_template", "creature_template_model"):
+        match = re.search(r"CREATE TABLE `" + table + r"` \(.*?;", schema, re.S)
+        if not match:
+            raise ValueError("Pinned world schema is missing " + table)
+        sql += match.group() + "\n"
+    sql += ("INSERT INTO creature_template (entry,name,faction) VALUES (6,'existing creature',7);\n"
+            "INSERT INTO creature_template_model (CreatureID,Idx,CreatureDisplayID,DisplayScale,Probability,VerifiedBuild) "
+            "VALUES (6,0,100,1,1,70532);\n")
+    execute(query, env=env, input=sql)
+    for _ in range(2):
+        execute(query, env=env, input="USE characters;\n" + embedded("custom/characters/2026_11_04_00_hordes_characters.sql"))
+        execute(query, env=env, input="USE world;\n" + embedded("custom/world/2026_11_04_00_hordes_world.sql"))
+    data = execute(query, env=env, input=(
+        "SELECT name,faction FROM world.creature_template WHERE entry=6;\n"
+        "SELECT COUNT(*) FROM world.creature_template WHERE entry IN (900950,900951) AND ScriptName='hordes_forever_enemy';\n"
+        "SELECT DisplayScale FROM world.creature_template_model WHERE CreatureID=900951;\n"))
+    if data.strip().splitlines() != ["existing creature\t7", "2", "2"]:
+        raise ValueError("Survivor migration changed a base entry or failed to create its dedicated entries: " + data)
+    execute(query, env=env, input=("INSERT INTO characters.hoa_forever_progress (guid,runs,coins) VALUES (7,1,42);\n"))
+    # Exercise the real mysqldump/atomic profile transition against this test's
+    # isolated database, including restoration data for a saved progress row.
+    saved = json.loads((state / "settings.json").read_text())
+    saved["core_image"] = survivor.BASELINE
+    (state / "settings.json").write_text(json.dumps(saved))
+    survivor.upgrade(root, saved, {"modeProtocol": 1, "clientBuild": 70532}, image, print)
+    backups = list((root / "backups").glob("*.sql.gz"))
+    if len(backups) != 1 or "hoa_forever_progress" not in gzip.decompress(backups[0].read_bytes()).decode():
+        raise ValueError("The real database backup is missing survivor progress")
+    if json.loads((state / "settings.json").read_text())["core_image"] != image:
+        raise ValueError("Profile did not switch to the verified engine after backup")
+    print("PASS: actual pinned SQL schema, repeated additive migration and real account/character backup")
 
 
 def execute(command, **kwargs):
@@ -29,6 +70,7 @@ def execute(command, **kwargs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
+    parser.add_argument("--survivor", action="store_true")
     args = parser.parse_args()
     for name in ("core.tar.gz", "mysql.tar.gz"):
         execute(["docker", "load", "--input", str(args.directory / name)])
@@ -121,6 +163,8 @@ def main():
             if text.strip() != "Небесный эльф":
                 raise ValueError("Unicode data did not survive the database restart")
             print("PASS: schema initialization, application credentials and Cyrillic persistence after restart")
+            if args.survivor:
+                test_survivor_sql(image, query, env, root, state)
         except Exception:
             logs = subprocess.run(compose + ["logs", "--tail", "100", "mysql"], env=env,
                                   capture_output=True, text=True)

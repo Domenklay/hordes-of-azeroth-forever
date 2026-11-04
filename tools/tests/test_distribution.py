@@ -204,7 +204,7 @@ class DistributionTests(unittest.TestCase):
         saved = {"build": 70450, "core_image": "old:1"}
         with patch.object(runtime, "validate_client"), patch.object(runtime.offline, "require_images"), \
                 patch.object(runtime.offline, "configuration", return_value=(saved, {}, [])):
-            with self.assertRaisesRegex(ValueError, "другому движку"):
+            with self.assertRaisesRegex(ValueError, "нет проверенного перехода"):
                 runtime.prepare(self.root, self.root, manifest(), self.root, lambda _: None)
 
     def test_native_patch_refuses_unrecognized_source(self):
