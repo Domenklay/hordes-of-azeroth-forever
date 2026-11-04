@@ -101,6 +101,27 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0][-1], "stop")
         self.assertNotIn("--volumes", run.call_args.args[0])
 
+    def test_public_container_resources_are_persistent_and_readable(self):
+        self.initialize()
+        _, env, _ = offline.configuration(self.state)
+        resource = Path(env["HOA_CONFIG"])
+        self.assertTrue(resource.is_relative_to(self.state))
+        self.assertEqual(env["HOA_CONFIG"], offline.configuration(self.state)[1]["HOA_CONFIG"])
+        for relative in ("mysql-init/01-databases.sh", "overrides/worldserver.conf"):
+            path = resource / relative
+            self.assertEqual(path.read_bytes(), (offline.CONFIG / relative).read_bytes())
+            if os.name == "posix":
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+                self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o755)
+        if os.name == "posix":
+            self.assertEqual(stat.S_IMODE((self.state / "mysql.env").stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(self.state.stat().st_mode), 0o700)
+        changed = resource / "mysql-init/01-databases.sh"
+        changed.write_text("keep this local change")
+        with self.assertRaises(ValueError):
+            offline.configuration(self.state)
+        self.assertEqual(changed.read_text(), "keep this local change")
+
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose not installed")
     def test_real_compose_configuration(self):
         self.initialize()

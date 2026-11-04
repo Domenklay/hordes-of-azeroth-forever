@@ -1,0 +1,127 @@
+name: Patch offline installer using verified engine
+
+on:
+  push:
+    tags: ['offline-patch-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Unique installer patch version'
+        required: true
+        default: '0.1.0-preview.3'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_RUN: '41821807853'
+  CORE_IMAGE: 'hoa-forever-core:0.1.0-preview.2'
+  PYTHONUTF8: '1'
+
+concurrency:
+  group: offline-installer-patch
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#offline-patch-v}}"
+          [[ "$version" =~ ^[0-9][A-Za-z0-9._-]{0,60}$ ]] || exit 1
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=offline-v$version" >> "$GITHUB_OUTPUT"
+
+  installer:
+    needs: metadata
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: launcher
+          path: input
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+      - name: Test and rebuild the installer with current runtime configuration
+        shell: bash
+        run: |
+          python -m unittest discover -s tools/tests -p 'test_distribution.py' -v
+          python -m pip install pyinstaller==6.16.0
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name HordesForeverSetup --paths tools --add-data 'config/offline:config/offline' --add-data 'tools/distribution/certgen.sh:distribution' tools/forever_setup.py
+          mkdir -p output
+          cp dist/HordesForeverSetup.exe input/game-launcher.zip input/forever-login-source.zip output/
+      - name: Open both packaged Windows applications
+        shell: pwsh
+        run: ./tools/distribution/smoke-windows.ps1 -PackageDirectory output
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patched-launcher
+          path: output/*
+          if-no-files-found: error
+
+  publish:
+    needs: [metadata, installer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+          path: input
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: patched-launcher
+          path: input
+      - name: Test the exact runtime configuration before publishing
+        run: python3 tools/distribution/smoke_runtime.py --directory input
+      - name: Prepare release assets
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          python3 tools/distribution/make_release.py --input input --output release --version "$VERSION" --tag "$TAG" --build 70532 --core-image "$CORE_IMAGE"
+          cp input/HordesForeverSetup.exe input/forever-login-source.zip release/
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          directory=Path('release')
+          with (directory/'SHA256SUMS').open('w') as output:
+              for path in sorted(directory.iterdir()):
+                  if path.name == 'SHA256SUMS': continue
+                  with path.open('rb') as source:
+                      value=hashlib.file_digest(source,'sha256').hexdigest()
+                  output.write(f'{value}  {path.name}\n')
+          PY
+          cat > notes.md <<'EOF'
+          Windows installer patch for client 1.60.1.70532, using the unchanged compiled Forever engine.
+          Packaged Windows windows, server binaries, certificates and MySQL restart are tested before publication.
+          Requires Docker Desktop (Linux containers) and your own client; no client or game data is included.
+          Base Forever preview: the Hordes game mode is not ported yet. In-game validation is still required.
+          Installation: config/offline/LAUNCHER.ru.md. Test checklist: config/offline/TESTING.ru.md.
+          EOF
+      - name: Publish after all validation succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Offline test build $TAG" --notes-file notes.md release/*
+          gh release edit "$TAG" --draft=false --latest
+          gh release edit offline-v0.1.0-preview.2 --prerelease --latest=false --title "Superseded: MySQL first-start issue (use preview.3 or newer)"

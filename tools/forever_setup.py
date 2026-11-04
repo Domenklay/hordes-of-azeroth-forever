@@ -88,7 +88,10 @@ class Launcher:
             try:
                 callback()
             except Exception as error:
-                self.events.put(("error", str(error)))
+                detail = str(error)
+                if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+                    detail += "\n" + error.stderr[-4000:]
+                self.events.put(("error", detail))
             finally:
                 self.events.put(("done", ""))
         threading.Thread(target=worker, daemon=True).start()

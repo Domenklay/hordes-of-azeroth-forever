@@ -2,6 +2,7 @@
 """CI-only smoke test of the packaged engine. Never claims a game-client test."""
 import argparse
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -83,6 +84,13 @@ def main():
             if text.strip() != "Небесный эльф":
                 raise ValueError("Unicode data did not survive the database restart")
             print("PASS: schema initialization, application credentials and Cyrillic persistence after restart")
+        except Exception:
+            logs = subprocess.run(compose + ["logs", "--tail", "100", "mysql"], env=env,
+                                  capture_output=True, text=True)
+            detail = re.sub(r"\b[0-9a-f]{64}\b", "<generated-test-secret>", logs.stdout + logs.stderr)[-14000:]
+            detail = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print("::error title=MySQL initialization log::" + detail)
+            raise
         finally:
             # Only this test's freshly created, uniquely named CI project.
             # This cleanup is never exposed by the user-facing launcher.

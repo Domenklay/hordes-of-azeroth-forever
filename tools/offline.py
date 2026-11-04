@@ -13,6 +13,33 @@ ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 CONFIG = ROOT / "config" / "offline"
 
 
+def runtime_resources(state):
+    # MySQL starts as a dedicated unprivileged container user. Application
+    # bundles and some checkouts have private directory modes, so they must
+    # not be mounted directly as MySQL's initialization directory. Persist
+    # only these PUBLIC resources, independently of PyInstaller's temp path.
+    files = [("mysql-init/01-databases.sh", (CONFIG / "mysql-init/01-databases.sh").read_bytes()),
+             ("overrides/worldserver.conf", (CONFIG / "overrides/worldserver.conf").read_bytes())]
+    checksum = hashlib.sha256()
+    for name, contents in files:
+        checksum.update(name.encode() + b"\0" + contents + b"\0")
+    root = state / "runtime-config" / checksum.hexdigest()[:16]
+    root.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, 0o755)
+    for name, contents in files:
+        target = root / name
+        target.parent.mkdir(exist_ok=True)
+        os.chmod(target.parent, 0o755)
+        if target.exists():
+            if target.read_bytes() != contents:
+                raise ValueError(f"Служебный файл изменён: {target}. Автоматическая перезапись отключена.")
+        else:
+            with open(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644), "wb") as stream:
+                stream.write(contents)
+        os.chmod(target, 0o644)
+    return root
+
+
 def check_files(data, certs):
     for name in ("dbc", "maps", "vmaps"):
         folder = data / name
@@ -49,7 +76,7 @@ def configuration(state):
     settings = json.loads((state / "settings.json").read_text(encoding="utf-8"))
     # Do not inherit arbitrary Compose overrides, profiles or a second env file.
     env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "HOA_"))}
-    env.update(HOA_STATE=str(state), HOA_CONFIG=str(CONFIG), HOA_DATA=settings["data"],
+    env.update(HOA_STATE=str(state), HOA_CONFIG=str(runtime_resources(state)), HOA_DATA=settings["data"],
                HOA_CERTS=settings["certs"], HOA_CLIENT_BUILD=str(settings["build"]),
                HOA_CORE_IMAGE=settings["core_image"], HOA_MYSQL_IMAGE=settings["mysql_image"])
     project = "hoa-offline-" + hashlib.sha256(str(state).encode()).hexdigest()[:12]
@@ -89,7 +116,7 @@ def main(argv=None):
     operations = {
         "start": ["up", "--detach", "--pull", "never", "--no-build"],
         "stop": ["stop"], "status": ["ps", "--all"],
-        "logs": ["logs", "--tail", "100", "worldserver", "bnetserver"],
+        "logs": ["logs", "--tail", "100", "mysql", "worldserver", "bnetserver"],
         "console": ["attach", "worldserver"], "validate": ["config", "--quiet"],
     }
     if args.action == "start":

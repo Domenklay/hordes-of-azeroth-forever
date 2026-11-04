@@ -46,6 +46,7 @@ def main():
     parser.add_argument("--version", required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--build", type=int, choices=(70450, 70532), default=70532)
+    parser.add_argument("--core-image", help="Reuse the exact image tag from an earlier, unchanged engine build")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", args.tag):
         parser.error("Invalid release tag")
@@ -53,7 +54,7 @@ def main():
     manifest = {"schema": 1, "version": args.version, "clientBuild": args.build,
                 "status": "base-forever-preview-not-hordes-port", "packages": [
         package(args.input / "core.tar.gz", "core", "docker-image", args.output, args.tag,
-                "hoa-forever-core:" + args.version),
+                args.core_image or "hoa-forever-core:" + args.version),
         package(args.input / "mysql.tar.gz", "mysql", "docker-image", args.output, args.tag, "mysql:8.0"),
         package(args.input / "game-launcher.zip", "game-launcher", "native-launcher", args.output, args.tag),
     ]}

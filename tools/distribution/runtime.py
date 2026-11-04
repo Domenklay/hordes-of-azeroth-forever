@@ -53,7 +53,7 @@ def engine(root, operation):
         offline.check_files(Path(settings["data"]), Path(settings["certs"]))
         offline.require_images(settings)
     args = {"start": ["up", "--detach", "--pull", "never", "--no-build"],
-            "stop": ["stop"], "logs": ["logs", "--tail", "60", "worldserver", "bnetserver"]}[operation]
+            "stop": ["stop"], "logs": ["logs", "--tail", "60", "mysql", "worldserver", "bnetserver"]}[operation]
     return subprocess.run(command + args, env=env, check=True, capture_output=True, text=True).stdout
 
 
