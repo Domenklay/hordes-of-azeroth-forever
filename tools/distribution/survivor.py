@@ -12,12 +12,13 @@ import uuid
 import offline
 
 BASELINE = "hoa-forever-core:0.1.0-preview.2"
-SURVIVOR = "hoa-forever-core:0.2.0-preview.1"
+PREVIOUS_SURVIVOR = "hoa-forever-core:0.2.0-preview.1"
+SURVIVOR = "hoa-forever-core:0.2.0-preview.3"
 
 
 def upgrade(root, saved, manifest, image, progress):
     if (manifest.get("modeProtocol") != 1 or saved["build"] != 70532 or
-            manifest["clientBuild"] != 70532 or saved["core_image"] != BASELINE or image != SURVIVOR):
+            manifest["clientBuild"] != 70532 or saved["core_image"] not in (BASELINE, PREVIOUS_SURVIVOR) or image != SURVIVOR):
         raise ValueError("Для этой версии движка нет проверенного перехода с сохранением базы.")
     profile = root / "profile"
     _, env, command = offline.configuration(profile)

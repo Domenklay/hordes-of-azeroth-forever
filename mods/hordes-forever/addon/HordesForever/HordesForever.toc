@@ -2,5 +2,5 @@
 ## Title: Hordes Forever — Выживание
 ## Notes: Одиночный вампирлайк: волны, автоматические атаки и выбор улучшений
 ## Author: Hordes Forever contributors
-## Version: 0.2.0-preview.1
+## Version: 0.2.0-preview.3
 HordesForever.lua

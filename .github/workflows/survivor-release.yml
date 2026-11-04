@@ -3,14 +3,16 @@ name: Publish Hordes survivor test build
 on:
   push:
     tags: ['survivor-v*']
+  workflow_run:
+    workflows: ['Build Hordes survivor engine']
+    types: [completed]
     branches: [main]
-    paths: ['.github/workflows/survivor-release.yml']
   workflow_dispatch:
     inputs:
       version:
         description: 'Unique installer patch version'
         required: true
-        default: '0.2.0-preview.2'
+        default: '0.2.0-preview.3'
 
 permissions:
   contents: read
@@ -18,8 +20,8 @@ permissions:
 
 env:
   SOURCE_RUN: '41821807853'
-  CORE_IMAGE: 'hoa-forever-core:0.2.0-preview.1'
-  MODE_RUN: '41851702265'
+  CORE_IMAGE: 'hoa-forever-core:0.2.0-preview.3'
+  MODE_RUN: '41870976208'
   PYTHONUTF8: '1'
 
 concurrency:
@@ -28,6 +30,7 @@ concurrency:
 
 jobs:
   metadata:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -38,7 +41,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           version="${INPUT_VERSION:-${GITHUB_REF_NAME#survivor-v}}"
-          if [[ "$version" == main ]]; then version=0.2.0-preview.2; fi
+          if [[ "$version" == main ]]; then version=0.2.0-preview.3; fi
           [[ "$version" =~ ^[0-9][A-Za-z0-9._-]{0,60}$ ]] || exit 1
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=offline-v$version" >> "$GITHUB_OUTPUT"
@@ -102,12 +105,14 @@ jobs:
         with:
           name: hordes-engine
           path: input
-          run-id: ${{ env.MODE_RUN }}
+          run-id: ${{ github.event.workflow_run.id || env.MODE_RUN }}
           github-token: ${{ github.token }}
       - name: Validate the packaged engine source matches this release
+        env:
+          ENGINE_SOURCE: ${{ github.event.workflow_run.head_sha || '4c2df631410dcc4922e3530c3e02a20504f26f7e' }}
         run: |
-          git fetch --depth=1 origin eb15a950510f1d3526d65003cfbfbcc2d8fe7aa6
-          git diff --exit-code FETCH_HEAD -- mods/hordes-forever/server mods/hordes-forever/sql
+          git fetch --depth=1 origin "$ENGINE_SOURCE"
+          git diff --exit-code FETCH_HEAD -- mods/hordes-forever/server mods/hordes-forever/sql tools/distribution/inject_hordes.py tools/distribution/prepare_mode_build.py
       - uses: actions/download-artifact@v4
         with:
           name: patched-launcher
@@ -140,11 +145,16 @@ jobs:
                   output.write(f'{value}  {path.name}\n')
           PY
           cat > notes.md <<'EOF'
-          Исправление списка миров для локального вампирлайка Forever 1.60.1.70532.
+          Исправление подключения аддона к серверному режиму Forever 1.60.1.70532.
+          Запросы HOAQ1 отправляются на SERVER и обрабатываются до поиска получателя шёпота.
+          Прежний транспорт FSC1 сохранён. Обе группы сообщений регистрируются перед отправкой.
+          Добавлены ограниченные повторные запросы и кнопка «Проверить связь»; серверные ошибки не затираются таймером.
+          Движок пересобран с исправлением обработчика. Перед переходом с предыдущего прототипа сохраняются auth/characters.
+          Исправление списка локальных миров из preview.2 сохранено.
           Перед игровым запуском доступен только локальный Normal/PvE «Hordes Offline» на порту 8085.
           Незапущенные PvP, RP и Hardcore скрыты с сохранением их строк в базе и резервной копии списка.
           Авторизация обновляет кэш после готовности мира; оба TLS-порта проверяются с локальным CA и проверкой имени.
-          Движок не изменён: используются те же готовые образы, проверенный кэш загрузок сохраняется.
+          Новая загрузка движка необходима; клиент Forever, база и персонажи сохраняются.
           В журнале теперь виден HOA_MODE_V1_READY и причины отказа игрового подключения.
           Одиночный прототип вампирлайка для Forever 1.60.1.70532.
           12 волн на арене Гурубаши, автоматические атаки, 6 улучшений на выбор, финальный босс и сохранение рекорда.
@@ -162,6 +172,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.metadata.outputs.tag }}
         run: |
-          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Hordes Forever — исправление списка локальных миров" --notes-file notes.md release/*
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Hordes Forever — исправление связи аддона с режимом" --notes-file notes.md release/*
           gh release edit "$TAG" --draft=false --latest
           gh release edit offline-v0.1.0-preview.2 --prerelease --latest=false --title "Superseded: MySQL first-start issue (use preview.3 or newer)"

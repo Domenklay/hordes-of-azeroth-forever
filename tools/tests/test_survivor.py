@@ -61,6 +61,25 @@ class SurvivorTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "profile/settings.json").read_text()), self.saved)
         self.assertEqual(list((self.root / "backups").iterdir()), [])
 
+    def test_previous_survivor_upgrade_backs_up_before_switch_and_keeps_credentials(self):
+        old = dict(self.saved, core_image=survivor.PREVIOUS_SURVIVOR)
+        credentials = self.root / "profile/database.env"
+        credentials.write_bytes(b"DB_PASSWORD=unchanged-test-fixture\n")
+        dump = ("-- MySQL dump\n" + "\n".join(f"INSERT INTO saved VALUES ({i},'character{i}');" for i in range(100))).encode()
+        class Dump:
+            def __init__(self, *_, **__): self.stdout = io.BytesIO(dump)
+            def wait(self): return 0
+        with patch.object(survivor.offline, "configuration", return_value=(old, {}, ["docker", "compose"])), \
+                patch.object(survivor.offline, "capture_command", return_value=subprocess.CompletedProcess([], 0, "[]")) as calls, \
+                patch.object(survivor.subprocess, "Popen", Dump):
+            survivor.upgrade(self.root, old, {"modeProtocol": 1, "clientBuild": 70532}, survivor.SURVIVOR, lambda _: None)
+        backups = list((self.root / "backups").glob("*.sql.gz"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(gzip.decompress(backups[0].read_bytes()), dump)
+        self.assertEqual(credentials.read_bytes(), b"DB_PASSWORD=unchanged-test-fixture\n")
+        self.assertEqual(json.loads((self.root / "profile/settings.json").read_text())["core_image"], survivor.SURVIVOR)
+        self.assertFalse(any("--volumes" in call.args[0] for call in calls.call_args_list))
+
     def test_injector_registers_exactly_once_and_keeps_existing_modules(self):
         loader = self.root / "src/server/scripts/Custom/custom_script_loader.cpp"
         loader.parent.mkdir(parents=True)
@@ -72,6 +91,28 @@ class SurvivorTests(unittest.TestCase):
         self.assertEqual(result.count("    AddSC_existing();"), 1)
         self.assertEqual(result.count("    AddSC_hordes_forever();"), 1)
         self.assertTrue((self.root / "sql/custom/characters/2026_11_04_00_hordes_characters.sql").is_file())
+
+    def test_server_endpoint_is_extended_before_lookup_without_replacing_donor_transport(self):
+        loader = self.root / "src/server/scripts/Custom/custom_script_loader.cpp"
+        loader.parent.mkdir(parents=True)
+        loader.write_text("void AddCustomScripts()\n{\n}\n")
+        chat = self.root / "src/server/game/Handlers/ChatHandler.cpp"
+        chat.parent.mkdir(parents=True)
+        chat.write_text('''if (type == CHAT_MSG_WHISPER && prefix == "FSC1")
+{
+    sScriptMgr->OnPlayerAddonMessageSent(sender, type, prefix, text, sender);
+    return;
+}
+switch (type) { /* normal whisper target resolution */ }
+''')
+        module = Path(__file__).resolve().parents[2] / "mods/hordes-forever"
+        inject_hordes.inject(self.root, module)
+        first = chat.read_text()
+        inject_hordes.inject(self.root, module)
+        self.assertEqual(chat.read_text(), first)
+        self.assertIn('(prefix == "FSC1" || prefix == "HOAQ1")', first)
+        self.assertLess(first.index('prefix == "HOAQ1"'), first.index('switch (type)'))
+        self.assertIn('OnPlayerAddonMessageSent(sender, type, prefix, text, sender)', first)
 
 
 if __name__ == "__main__": unittest.main()

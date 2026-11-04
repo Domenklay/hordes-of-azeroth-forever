@@ -1,6 +1,8 @@
 -- GPL-2.0-or-later. The server owns all combat, progression and rewards.
 local REQUEST, RESPONSE = "HOAQ1", "HOAF1"
 local matched, running, nonce = false, false, 0
+local received, attempts = false, 0
+local transportError
 local cards = {
     [1] = { "Тёмная мощь", "+6 к урону автоматического снаряда за ранг." },
     [2] = { "Быстрые руки", "Снаряды вылетают на 60 мс чаще за ранг." },
@@ -35,16 +37,33 @@ local function button(parent, label, width, x, y, click)
     return result
 end
 local function send(message)
-    local name = UnitName("player")
-    if not name then return end
-    if C_ChatInfo and C_ChatInfo.SendAddonMessage then
-        C_ChatInfo.SendAddonMessage(REQUEST, message, "WHISPER", name)
-    elseif SendAddonMessage then
-        SendAddonMessage(REQUEST, message, "WHISPER", name)
+    local function report(error)
+        if transportError then transportError(error) end
     end
+    if C_ChatInfo and C_ChatInfo.SendAddonMessage then
+        -- Both prefixes are registered before sending. SERVER deliberately
+        -- avoids Forever's unreliable self-whisper path; the core routes this
+        -- prefix directly to the sending session's player, not a named target.
+        if C_ChatInfo.RegisterAddonMessagePrefix then
+            C_ChatInfo.RegisterAddonMessagePrefix(REQUEST)
+            C_ChatInfo.RegisterAddonMessagePrefix(RESPONSE)
+        end
+        local ok, result = pcall(C_ChatInfo.SendAddonMessage, REQUEST, message, "WHISPER", "SERVER")
+        local success = Enum and Enum.SendAddonMessageResult and Enum.SendAddonMessageResult.Success
+        if not ok or result == false or (success ~= nil and result ~= nil and result ~= success) then
+            report("Не удалось отправить запрос режиму. Код: " .. tostring(result))
+            return false
+        end
+    elseif SendAddonMessage then
+        local ok, error = pcall(SendAddonMessage, REQUEST, message, "WHISPER", "SERVER")
+        if not ok then report(tostring(error)); return false end
+    else
+        report("В клиенте недоступна отправка сообщений аддона."); return false
+    end
+    return true
 end
 
-local menu = panel("HordesForeverMenu", 580, 310)
+local menu = panel("HordesForeverMenu", 580, 350)
 menu:SetFrameStrata("DIALOG")
 text(menu, "GameFontNormalLarge", "Hordes Forever • Вампирлайк", 24, -24)
 text(menu, "GameFontHighlight", "Первый одиночный прототип для Forever", 24, -55)
@@ -59,6 +78,12 @@ local start = button(menu, "Начать забег", 240, 24, -252, function()
 end)
 start:Disable()
 button(menu, "Закрыть", 240, 310, -252, function() menu:Hide() end)
+button(menu, "Проверить связь", 240, 24, -294, function()
+    received = false; attempts = 0
+    info:SetText("Проверка связи с режимом Hordes…")
+    send("HELLO")
+end)
+transportError = function(message) received = true; info:SetText(message); menu:Show() end
 table.insert(UISpecialFrames, "HordesForeverMenu")
 
 local hud = panel("HordesForeverHUD", 460, 160)
@@ -108,6 +133,7 @@ local function receive(message)
     local command, body = message:match("^(%S+)%s*(.*)$")
     local values = words(body or "")
     if command == "HELLO" then
+        received = true
         matched = values[1] == "1"
         if matched then info:SetText("Подключён сервер вампирлайка Hordes Forever."); start:Enable() end
     elseif command == "IDLE" and matched then
@@ -144,6 +170,7 @@ local function receive(message)
         info:SetText((outcomes[values[1]] or "Забег завершён.") .. "\nТы возвращаешься к месту старта.")
         records:SetText(string.format("Убийств: %s • Волна: %s • Получено монет: %s", values[2] or "0", values[3] or "0", values[5] or "0"))
     elseif command == "ERROR" then
+        received = true
         info:SetText(body); menu:Show()
         if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cffff7777Hordes:|r " .. body) end
     end
@@ -155,13 +182,25 @@ events:RegisterEvent("PLAYER_ENTERING_WORLD")
 events:RegisterEvent("CHAT_MSG_ADDON")
 events:SetScript("OnEvent", function(_, event, prefix, message, channel, sender)
     if event == "PLAYER_LOGIN" then
-        if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then C_ChatInfo.RegisterAddonMessagePrefix(RESPONSE) end
+        if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
+            C_ChatInfo.RegisterAddonMessagePrefix(REQUEST)
+            C_ChatInfo.RegisterAddonMessagePrefix(RESPONSE)
+        end
         menu:Show()
     elseif event == "PLAYER_ENTERING_WORLD" then
-        C_Timer.After(1, function() send("HELLO") end)
+        attempts = 0
+        local function hello()
+            if matched or received or attempts >= 3 then return end
+            attempts = attempts + 1
+            send("HELLO")
+            if not matched and not received and attempts < 3 then C_Timer.After(2, hello) end
+        end
+        C_Timer.After(1, function()
+            if running then send("HELLO") else hello() end
+        end)
         C_Timer.After(7, function()
-            if not matched then
-                info:SetText("Режим Hordes не ответил. Убедись, что запущен образ с вампирлайком, а не базовый Forever.")
+            if not matched and not received then
+                info:SetText("Нет ответа от режима. Нажми «Проверить связь». Если связь не появилась, скопируй журнал движка.")
                 start:Disable(); menu:Show()
             end
         end)
