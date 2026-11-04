@@ -47,6 +47,7 @@ def main():
         certs.mkdir()
         certificate_script = Path(__file__).with_name("certgen.sh").resolve()
         execute(["docker", "run", "--rm", "--pull=never", "--network", "none",
+                 "--user", f"{os.getuid()}:{os.getgid()}",
                  "--mount", f"type=bind,source={certs},target=/certs",
                  "--mount", f"type=bind,source={certificate_script},target=/certgen.sh,readonly",
                  "--entrypoint", "bash", image, "/certgen.sh"])
