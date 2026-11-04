@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check the real adapter with CMake's own flags before a costly full build."""
 import json
+import re
 from pathlib import Path
 import shlex
 import subprocess
@@ -28,6 +29,7 @@ result = subprocess.run(command, cwd=entry["directory"], stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, text=True)
 print(result.stdout)
 if result.returncode:
-    diagnostic = result.stdout[-3000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    errors = "\n".join(line for line in result.stdout.splitlines() if re.search(r"(?:fatal )?error:", line))
+    diagnostic = (errors or result.stdout[-3000:])[:3500].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Hordes TrinityCore API check::" + diagnostic)
 sys.exit(result.returncode)

@@ -164,6 +164,17 @@ public:
     }
 };
 
+class Enemies final : public CreatureScript
+{
+public:
+    Enemies() : CreatureScript("hordes_forever_enemy") { }
+    CreatureAI* GetAI(Creature* creature) const override
+    {
+        auto summon = creature->ToTempSummon();
+        return new EnemyAI(creature, summon ? summon->GetSummonerGUID() : ObjectGuid::Empty);
+    }
+};
+
 void Spawn(Player* p, Run& run, bool boss)
 {
     std::uniform_real_distribution<float> angle(0, 6.2831853f);
@@ -172,7 +183,6 @@ void Spawn(Player* p, Run& run, bool boss)
     if (auto creature = p->SummonCreature(boss ? BossEntry : EnemyEntry, pos, TEMPSUMMON_MANUAL_DESPAWN,
                                         std::chrono::milliseconds(0), 0, 0, p->GetGUID()))
     {
-        creature->SetAI(new EnemyAI(creature, p->GetGUID()));
         creature->SetFaction(14);
         creature->SetLevel(p->GetLevel());
         creature->SetMaxHealth(run.progress.MobHealth(boss));
@@ -425,4 +435,5 @@ void AddSC_hordes_forever()
 {
     new HordesForever::Startup(); new HordesForever::Players();
     new HordesForever::Damage(); new HordesForever::Commands();
+    new HordesForever::Enemies();
 }
