@@ -143,7 +143,7 @@ class DistributionTests(unittest.TestCase):
         version = self.root / "packages/test"
         (version / "game-launcher").mkdir(parents=True)
         (version / "game-launcher/forever-launcher.exe").write_bytes(b"test")
-        with patch.object(runtime, "validate_client"), patch.object(runtime.socket, "create_connection"), \
+        with patch.object(runtime, "validate_client"), patch.object(runtime, "status", return_value={"ready": True}), \
                 patch.object(runtime.subprocess, "Popen") as spawn:
             runtime.launch(self.root, version, manifest(), client)
         kwargs = spawn.call_args.kwargs
@@ -152,6 +152,49 @@ class DistributionTests(unittest.TestCase):
         settings = json.loads((self.root / "game-settings/settings.json").read_text())
         self.assertEqual(settings["server"]["address"], "127.0.0.1")
         self.assertEqual(settings["locale"], "ruRU")
+
+    def test_compose_status_formats(self):
+        values = [{"Service": "mysql", "State": "running"}, {"Service": "worldserver", "State": "exited"}]
+        expected = {value["Service"]: value for value in values}
+        self.assertEqual(runtime.parse_services(json.dumps(values)), expected)
+        self.assertEqual(runtime.parse_services("\n".join(json.dumps(v) for v in values)), expected)
+        self.assertEqual(runtime.parse_services(""), {})
+        with self.assertRaises(ValueError):
+            runtime.parse_services('{"unexpected":true}')
+
+    def report(self, world_state="running", exit_code=0, mysql_health="healthy", connection_error=False):
+        values = [{"Service": "mysql", "State": "running", "Health": mysql_health},
+                  {"Service": "worldserver", "State": world_state, "ExitCode": exit_code},
+                  {"Service": "bnetserver", "State": "running"}]
+        with patch.object(runtime.offline, "configuration", return_value=({}, {}, ["docker", "compose"])), \
+                patch.object(runtime, "command_output", return_value=json.dumps(values)), \
+                patch.object(runtime.socket, "create_connection") as connect:
+            if connection_error:
+                connect.side_effect = ConnectionRefusedError()
+            return runtime.status(self.root)
+
+    def test_crashed_world_is_reported_as_failure_not_import(self):
+        report = self.report(world_state="exited", exit_code=1)
+        self.assertFalse(report["ready"])
+        self.assertTrue(report["failed"])
+        self.assertIn("код 1", report["details"])
+        self.assertIn("завершился с ошибкой", report["message"])
+
+    def test_running_processes_without_connections_are_not_ready(self):
+        report = self.report(connection_error=True)
+        self.assertFalse(report["ready"])
+        self.assertFalse(report["failed"])
+        self.assertIn("подготовка или импорт", report["message"])
+        self.assertTrue(self.report()["ready"])
+        self.assertFalse(self.report(mysql_health="starting")["ready"])
+        self.assertTrue(self.report(mysql_health="unhealthy")["failed"])
+
+    def test_console_is_not_opened_for_unready_engine(self):
+        with patch.object(runtime, "status", return_value=self.report(world_state="exited", exit_code=1)), \
+                patch.object(runtime.subprocess, "Popen") as spawn:
+            with self.assertRaisesRegex(ValueError, "завершился с ошибкой"):
+                runtime.console(self.root)
+        spawn.assert_not_called()
 
     def test_prepare_rejects_implicit_database_upgrade(self):
         (self.root / "profile").mkdir()

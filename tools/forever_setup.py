@@ -18,8 +18,8 @@ class Launcher:
     def __init__(self, window):
         self.window = window
         window.title("Hordes Forever — локальная игра")
-        window.geometry("850x640")
-        window.minsize(700, 560)
+        window.geometry("850x720")
+        window.minsize(700, 620)
         self.events = queue.Queue()
         self.busy = False
         self.native = None
@@ -51,6 +51,7 @@ class Launcher:
             ("Создать аккаунт / открыть консоль", self.account),
             ("Остановить локальный движок", self.stop),
             ("Журнал движка", self.logs),
+            ("Состояние движка", self.engine_status),
         ]:
             button = ttk.Button(frame, text=label, command=lambda cb=callback: self.work(cb))
             button.pack(fill="x", pady=3)
@@ -58,6 +59,7 @@ class Launcher:
         ttk.Label(frame, textvariable=self.status, wraplength=780).pack(anchor="w", pady=8)
         self.log = tk.Text(frame, height=8, wrap="word", state="disabled")
         self.log.pack(fill="both", expand=True)
+        ttk.Button(frame, text="Скопировать журнал", command=self.copy_log).pack(anchor="e", pady=4)
         ttk.Button(frame, text="Инструкция / Docker Desktop", command=lambda: webbrowser.open(
             "https://github.com/" + installer.REPOSITORY + "/blob/main/config/offline/LAUNCHER.ru.md")).pack(pady=4)
         window.after(150, self.poll)
@@ -67,6 +69,16 @@ class Launcher:
         folder = filedialog.askdirectory(title="Корень клиента Forever (Data и .build.info)")
         if folder:
             self.client.set(folder)
+
+    def copy_log(self):
+        text = self.log.get("1.0", "end-1c")
+        if not text.strip():
+            self.status.set("Журнал пока пуст.")
+            return
+        self.window.clipboard_clear()
+        self.window.clipboard_append(text)
+        self.window.update_idletasks()
+        self.status.set("Журнал скопирован в буфер обмена.")
 
     def save_client(self, client):
         self.settings["client"] = str(client)
@@ -165,8 +177,13 @@ class Launcher:
         runtime.prepare(self.root, version, manifest, self.client_path, self.progress)
         self.save_client(self.client_path)
         runtime.engine(self.root, "start")
-        self.progress("Движок запускается. Первый импорт базы долгий: не останавливайте его. "
-                      "Готовность проверьте в журнале, затем нажмите «Войти в игру».")
+        self.engine_status()
+
+    def engine_status(self):
+        report = runtime.status(self.root)
+        self.progress(report["message"] + "\n" + report["details"])
+        if report["failed"]:
+            self.progress(runtime.engine(self.root, "logs"))
 
     def play(self):
         if self.client_path is None:

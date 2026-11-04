@@ -8,6 +8,76 @@ import subprocess
 import offline
 from .installer import validate_client
 
+SERVICES = {"mysql": "База", "worldserver": "Игровой мир", "bnetserver": "Авторизация"}
+
+
+def command_output(command, **kwargs):
+    return subprocess.run(command, check=True, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace",
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), **kwargs).stdout
+
+
+def parse_services(text):
+    if not text.strip():
+        return {}
+    try:
+        values = json.loads(text)
+        if isinstance(values, dict):
+            values = [values]
+    except json.JSONDecodeError:
+        values = [json.loads(line) for line in text.splitlines() if line.strip()]
+    if not isinstance(values, list) or any(not isinstance(v, dict) or "Service" not in v for v in values):
+        raise ValueError("Не удалось разобрать состояние Docker Compose")
+    return {value["Service"]: value for value in values}
+
+
+def status(root):
+    _, env, command = offline.configuration(root / "profile")
+    services = parse_services(command_output(command + ["ps", "--all", "--format", "json"], env=env))
+    lines, failed = [], False
+    all_running = True
+    translations = {"running": "работает", "exited": "остановлен", "dead": "аварийно остановлен",
+                    "created": "создан, ещё не запущен", "restarting": "перезапускается", "paused": "приостановлен"}
+    for name, label in SERVICES.items():
+        service = services.get(name, {})
+        state = str(service.get("State", "missing")).lower()
+        all_running = all_running and state == "running"
+        line = f"{label}: {translations.get(state, state if service else 'не запущен')}"
+        if state in ("exited", "dead"):
+            code = service.get("ExitCode")
+            if code is not None:
+                line += f" (код {code})"
+            failed = failed or state == "dead" or str(code or 0) != "0"
+        if service.get("Health") == "unhealthy":
+            line += "; проверка работоспособности не пройдена"
+            failed = True
+        lines.append(line)
+    ready = all_running and not failed and services.get("mysql", {}).get("Health", "") in ("", "healthy")
+    if ready:
+        for port in (1119, 8081, 8085):
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=1):
+                    pass
+            except OSError:
+                ready = False
+                break
+    if failed:
+        message = "Один из процессов завершился с ошибкой. Откройте «Журнал движка»; ожидание импорта это не исправит."
+    elif ready:
+        message = "Движок принимает подключения. Можно открыть игровой лаунчер."
+    elif all_running:
+        message = ("Процессы работают, но подключения ещё недоступны. Может идти подготовка или импорт; "
+                   "причину и продвижение смотрите в «Журнале движка».")
+    else:
+        message = "Движок не запущен полностью. Проверьте состояния процессов и «Журнал движка»."
+    return {"ready": ready, "failed": failed, "message": message, "details": "\n".join(lines)}
+
+
+def require_ready(root):
+    report = status(root)
+    if not report["ready"]:
+        raise ValueError(report["message"] + "\n" + report["details"])
+
 
 def prepare(root, version, manifest, client, progress):
     validate_client(client, manifest["clientBuild"])
@@ -26,10 +96,10 @@ def prepare(root, version, manifest, client, progress):
     certs.mkdir(parents=True, exist_ok=True)
     script = Path(__file__).with_name("certgen.sh").resolve()
     progress("Создание локальных сертификатов…")
-    subprocess.run(["docker", "run", "--rm", "--pull=never", "--network", "none",
+    command_output(["docker", "run", "--rm", "--pull=never", "--network", "none",
                     "--mount", f"type=bind,source={certs},target=/certs",
                     "--mount", f"type=bind,source={script},target=/certgen.sh,readonly",
-                    "--entrypoint", "bash", images["core"], "/certgen.sh"], check=True)
+                    "--entrypoint", "bash", images["core"], "/certgen.sh"])
     data = root / "data"
     data.mkdir(parents=True, exist_ok=True)
     try:
@@ -38,10 +108,10 @@ def prepare(root, version, manifest, client, progress):
         # Extraction may be resumed after failure, but only inside the app's
         # dedicated output folder. The user's client is mounted read-only.
         progress("Извлечение данных клиента. Это может занять много времени…")
-        subprocess.run(["docker", "run", "--rm", "--pull=never", "--network", "none",
+        command_output(["docker", "run", "--rm", "--pull=never", "--network", "none",
                         "--mount", f"type=bind,source={client},target=/wow,readonly",
                         "--mount", f"type=bind,source={data},target=/opt/trinitycore/data",
-                        "--entrypoint", "/usr/local/bin/extract.sh", images["core"]], check=True)
+                        "--entrypoint", "/usr/local/bin/extract.sh", images["core"]])
     offline.initialize(profile, data, certs, manifest["clientBuild"], images["core"], images["mysql"])
     return profile
 
@@ -54,10 +124,11 @@ def engine(root, operation):
         offline.require_images(settings)
     args = {"start": ["up", "--detach", "--pull", "never", "--no-build"],
             "stop": ["stop"], "logs": ["logs", "--tail", "60", "mysql", "worldserver", "bnetserver"]}[operation]
-    return subprocess.run(command + args, env=env, check=True, capture_output=True, text=True).stdout
+    return command_output(command + args, env=env)
 
 
 def console(root):
+    require_ready(root)
     _, env, command = offline.configuration(root / "profile")
     return subprocess.Popen(command + ["attach", "--sig-proxy=false", "worldserver"], env=env,
                             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
@@ -65,13 +136,7 @@ def console(root):
 
 def launch(root, version, manifest, client):
     validate_client(client, manifest["clientBuild"])
-    for port in (1119, 8081, 8085):
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=2):
-                pass
-        except OSError as error:
-            raise ValueError("Движок ещё не принимает подключения. Дождитесь импорта базы, "
-                             "проверьте журнал и нажмите «Войти в игру» ещё раз.") from error
+    require_ready(root)
     native = version / "game-launcher" / "forever-launcher.exe"
     if not native.is_file():
         raise ValueError("Не установлен игровой лаунчер")
