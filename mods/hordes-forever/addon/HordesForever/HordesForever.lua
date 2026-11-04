@@ -50,7 +50,7 @@ local function send(message)
         end
         local ok, result = pcall(C_ChatInfo.SendAddonMessage, REQUEST, message, "WHISPER", "SERVER")
         local success = Enum and Enum.SendAddonMessageResult and Enum.SendAddonMessageResult.Success
-        if not ok or result == false or (success ~= nil and result ~= nil and result ~= success) then
+        if not ok or result == false or (success ~= nil and type(result) == "number" and result ~= success) then
             report("Не удалось отправить запрос режиму. Код: " .. tostring(result))
             return false
         end
@@ -74,7 +74,7 @@ info:SetWidth(530)
 info:SetJustifyH("LEFT")
 local records = text(menu, "GameFontHighlight", "", 24, -205)
 local start = button(menu, "Начать забег", 240, 24, -252, function()
-    if matched and not running then send("START"); info:SetText("Переход на арену…") end
+    if matched and not running and send("START") then info:SetText("Переход на арену…") end
 end)
 start:Disable()
 button(menu, "Закрыть", 240, 310, -252, function() menu:Hide() end)
