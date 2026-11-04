@@ -161,7 +161,7 @@ class OfflineTests(unittest.TestCase):
         _, env, command = offline.configuration(self.state)
         # Capture privately: expanded config contains generated test passwords.
         result = subprocess.run(command + ["config", "--format", "json"], env=env,
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, "Docker Compose rejected the offline configuration")
         config = json.loads(result.stdout)
         self.assertEqual(set(config["services"]), {"mysql", "worldserver", "bnetserver"})

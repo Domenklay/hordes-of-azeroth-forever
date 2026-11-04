@@ -17,7 +17,7 @@ class DiagnosticsTests(unittest.TestCase):
             "private account password not for the report",
             "C->S: classic opcode 0x2D002B translated to [CMSG_CHAT_ADDON_MESSAGE_TARGETED 0x2C002B (123)]",
             "C->S: 172.18.0.1 [CMSG_CHAT_MESSAGE_SAY 0x2C0023]",
-            "WorldSocket wrong opcode (opcode: 0x44, size: 0) data: private-token",
+            "WorldSocket wrong opcode (opcode: 0x44, size: 0) data: private-token 0xabcdef",
             "WorldSession ByteBufferException (pos: 5 size: 5) (opcode: [CMSG_TEST 0x123]) from [Player: private-name]",
         ]
         text = "\n".join(diagnostics.clean_lines(lines))
@@ -26,6 +26,7 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertIn("pos: 5 size: 5", text)
         self.assertNotIn("private", text)
         self.assertNotIn("172.18", text)
+        self.assertNotIn("0xabcdef", text)
 
     def test_collection_restores_levels_and_detaches_when_ui_callback_fails(self):
         class Channel:

@@ -38,7 +38,7 @@ def clean_lines(lines):
     for line in lines:
         line = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line)
         name = re.search(r"\bCMSG_[A-Z0-9_]+\b", line)
-        codes = re.findall(r"\b0x[0-9a-fA-F]{1,8}\b", line)
+        codes = re.findall(r"\b0x[0-9a-fA-F]{1,8}\b", line.partition(" data:")[0])
         if "C->S:" in line and (name or codes):
             output.append("C->S: " + (name.group() if name else "UNKNOWN") + " | " + " → ".join(codes[:2]))
         elif any(word in line for word in ("ByteBufferException", "wrong opcode", "No defined handler")):
@@ -67,7 +67,7 @@ def collect(endpoint, identity, progress=lambda _: None, seconds=20):
                     continue
                 if not block:
                     break
-                pending += decoder.decode(block)
+                pending = (pending + decoder.decode(block))[-262144:]
                 lines = pending.split("\n")
                 pending = lines.pop()
                 with lock:
@@ -76,7 +76,6 @@ def collect(endpoint, identity, progress=lambda _: None, seconds=20):
             read_errors.append("Канал консоли был закрыт во время проверки")
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
-    restored = False
     try:
         attachment.send_line("server set loglevel l network.opcode 1")
         attachment.send_line("server set loglevel a Console 1")
@@ -89,16 +88,16 @@ def collect(endpoint, identity, progress=lambda _: None, seconds=20):
             attachment.send_line(f"server set loglevel l network.opcode {previous_logger}")
             attachment.send_line(f"server set loglevel a Console {previous_console}")
             time.sleep(0.4)  # allow the CLI to consume restoration before detaching
-            restored = True
             attachment.detach()
+        except OSError as error:
+            raise ValueError("Канал Docker закрыт: восстановление журнала не подтверждено. "
+                             "После выхода из игры перезапустите локальный движок.") from error
         finally:
             stopped.set()
             reader.join(timeout=1)
             attachment.close()
     with lock:
         result = clean_lines(list(captured))
-    if not restored:
-        raise ValueError("Не подтверждено восстановление журнала. Перезапустите локальный движок.")
     header = ["=== HOA: проверка обмена с игрой ===",
               "Конфигурация: " + "; ".join(f"{key}={values.get(key, '?')}" for key in PUBLIC_KEYS),
               f"Строк входящего обмена: {len(result)}",
