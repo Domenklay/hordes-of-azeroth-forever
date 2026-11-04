@@ -112,7 +112,7 @@ jobs:
         with:
           name: patched-launcher
           path: input
-      - name: Test the exact runtime configuration before publishing
+      - name: Test the exact runtime, local realm catalog and TLS before publishing
         run: |
           python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
           sudo apt-get update -qq
