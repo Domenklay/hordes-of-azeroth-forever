@@ -7,6 +7,9 @@ on:
     paths:
       - 'tools/forever_setup.py'
       - 'tools/tests/test_launcher_gui.py'
+      - 'tools/tests/test_diagnostics.py'
+      - 'tools/distribution/docker_attach.py'
+      - 'tools/distribution/diagnostics.py'
       - '.github/workflows/launcher-layout.yml'
 
 permissions:
@@ -25,7 +28,7 @@ jobs:
         shell: python
         run: |
           import subprocess,sys
-          result=subprocess.run([sys.executable,'-m','unittest','discover','-s','tools/tests','-p','test_launcher_gui.py','-v'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+          result=subprocess.run([sys.executable,'-m','unittest','discover','-s','tools/tests','-p','test_*.py','-v'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
           print(result.stdout)
           if result.returncode:
               detail=result.stdout[-3500:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')

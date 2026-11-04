@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
-from distribution import installer, runtime
+from distribution import installer, runtime, diagnostics
 
 
 class Launcher:
@@ -76,9 +76,14 @@ class Launcher:
             self.buttons.append(button)
         self.logs_page.rowconfigure(1, weight=1)
         self.logs_page.columnconfigure(0, weight=1)
-        refresh = ttk.Button(self.logs_page, text="Обновить журнал движка", command=lambda: self.work(self.logs))
-        refresh.grid(row=0, column=0, sticky="w", pady=(0, 8))
+        toolbar = ttk.Frame(self.logs_page)
+        toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        refresh = ttk.Button(toolbar, text="Обновить журнал движка", command=lambda: self.work(self.logs))
+        refresh.pack(side="left")
         self.buttons.append(refresh)
+        trace = ttk.Button(toolbar, text="Проверить обмен с игрой (20 сек)", command=lambda: self.work(self.trace))
+        trace.pack(side="left", padx=8)
+        self.buttons.append(trace)
         self.log = tk.Text(self.logs_page, height=8, wrap="word", state="disabled")
         self.log.grid(row=1, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(self.logs_page, orient="vertical", command=self.log.yview)
@@ -238,6 +243,9 @@ class Launcher:
 
     def logs(self):
         self.events.put(("engine_log", runtime.engine(self.root, "logs")))
+
+    def trace(self):
+        self.events.put(("engine_log", diagnostics.run(self.root, self.progress)))
 
     def close(self):
         if self.busy:
