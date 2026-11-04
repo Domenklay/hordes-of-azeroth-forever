@@ -167,6 +167,7 @@ class DistributionTests(unittest.TestCase):
                   {"Service": "worldserver", "State": world_state, "ExitCode": exit_code},
                   {"Service": "bnetserver", "State": "running"}]
         with patch.object(runtime.offline, "configuration", return_value=({}, {}, ["docker", "compose"])), \
+                patch.object(runtime.offline, "internal_network", return_value=False), \
                 patch.object(runtime, "command_output", return_value=json.dumps(values)), \
                 patch.object(runtime.socket, "create_connection") as connect:
             if connection_error:
@@ -185,6 +186,8 @@ class DistributionTests(unittest.TestCase):
         self.assertFalse(report["ready"])
         self.assertFalse(report["failed"])
         self.assertIn("подготовка или импорт", report["message"])
+        for port in (1119, 8081, 8085):
+            self.assertIn(str(port), report["details"])
         self.assertTrue(self.report()["ready"])
         self.assertFalse(self.report(mysql_health="starting")["ready"])
         self.assertTrue(self.report(mysql_health="unhealthy")["failed"])

@@ -60,6 +60,6 @@
       ]
     }
   },
-  "networks": {"local": {"internal": true}},
+  "networks": {"local": {"driver": "bridge"}},
   "volumes": {"saves": {}, "logs": {}}
 }

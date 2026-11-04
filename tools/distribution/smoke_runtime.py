@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """CI-only smoke test of the packaged engine. Never claims a game-client test."""
 import argparse
+import copy
+import json
 import os
 import re
 from pathlib import Path
@@ -10,6 +12,7 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import offline
+from distribution import runtime
 
 
 def execute(command, **kwargs):
@@ -53,8 +56,9 @@ def main():
                  "--mount", f"type=bind,source={certificate_script},target=/certgen.sh,readonly",
                  "--entrypoint", "bash", image, "/certgen.sh"])
         print("PASS: local certificate generation inside the actual packaged image")
-        # Compose requires data mounts even when starting only MySQL. These
-        # are explicitly fixtures: worldserver is NEVER started with them.
+        # These are fixtures, not game data. The TrinityCore worldserver
+        # binary is NEVER started with them; explicit OpenSSL TCP listeners
+        # below test only published ports and network migration.
         for relative in ("dbc/fixture", "maps/fixture", "vmaps/GameObjectModels.dtree"):
             path = data / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,8 +72,33 @@ def main():
         query = compose + ["exec", "-T", "mysql", "sh", "-c",
                            'MYSQL_PWD="$DB_PASSWORD" exec mysql -u trinity '
                            '--default-character-set=utf8mb4 --batch --raw --skip-column-names']
+        probe = json.loads((offline.CONFIG / "compose.json").read_text(encoding="utf-8"))
+        for service in ("worldserver", "bnetserver"):
+            probe["services"][service]["init"] = True
+            probe["services"][service]["stop_grace_period"] = "3s"
+        probe["services"]["worldserver"].update(
+            entrypoint=["openssl"], command=["s_server", "-nocert", "-www", "-accept", "0.0.0.0:8085"])
+        probe["services"]["bnetserver"].update(
+            entrypoint=["bash", "-c"],
+            command=["openssl s_server -nocert -www -accept 0.0.0.0:1119 >/dev/null 2>&1 & "
+                     "exec openssl s_server -nocert -www -accept 0.0.0.0:8081"])
+        legacy = copy.deepcopy(probe)
+        legacy["networks"]["local"]["internal"] = True
+        def probe_command(config, name):
+            path = root / name
+            path.write_text(json.dumps(config), encoding="utf-8")
+            command = list(compose)
+            command[command.index("--file") + 1] = str(path)
+            return command
+        legacy_command = probe_command(legacy, "legacy-probe.json")
+        bridge_command = probe_command(probe, "bridge-probe.json")
+        up = ["up", "--detach", "--wait", "--wait-timeout", "180", "--pull", "never", "--no-build"]
         try:
-            execute(start, env=env)
+            execute(legacy_command + up, env=env)
+            if not offline.internal_network(compose):
+                raise ValueError("Legacy network fixture was not internal")
+            blocked = runtime.status(root)
+            print("Legacy internal network host reachability:", blocked["ready"])
             count = execute(query, env=env, input=(
                 "SELECT COUNT(*) FROM information_schema.SCHEMATA "
                 "WHERE SCHEMA_NAME IN ('auth','characters','world','hotfixes');\n"))
@@ -78,6 +107,14 @@ def main():
             execute(query, env=env, input=(
                 "CREATE TABLE characters.hoa_ci_persistence (id INT PRIMARY KEY, value VARCHAR(80));\n"
                 "INSERT INTO characters.hoa_ci_persistence VALUES (1, 'Небесный эльф');\n"))
+            offline.repair_network(env, compose, print)
+            execute(bridge_command + up, env=env)
+            accessible = runtime.status(root)
+            if not accessible["ready"]:
+                raise ValueError("Host ports were not published after migration: " + accessible["details"])
+            if offline.internal_network(compose):
+                raise ValueError("Network migration kept the internal flag")
+            print("PASS: all three localhost ports and migration from the legacy internal network")
             execute(compose + ["stop", "mysql"], env=env)
             execute(start, env=env)
             text = execute(query, env=env, input="SELECT value FROM characters.hoa_ci_persistence WHERE id=1;\n")

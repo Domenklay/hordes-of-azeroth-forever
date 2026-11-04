@@ -12,23 +12,11 @@ SERVICES = {"mysql": "База", "worldserver": "Игровой мир", "bnetse
 
 
 def command_output(command, **kwargs):
-    return subprocess.run(command, check=True, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace",
-                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), **kwargs).stdout
+    return offline.capture_command(command, **kwargs).stdout
 
 
 def parse_services(text):
-    if not text.strip():
-        return {}
-    try:
-        values = json.loads(text)
-        if isinstance(values, dict):
-            values = [values]
-    except json.JSONDecodeError:
-        values = [json.loads(line) for line in text.splitlines() if line.strip()]
-    if not isinstance(values, list) or any(not isinstance(v, dict) or "Service" not in v for v in values):
-        raise ValueError("Не удалось разобрать состояние Docker Compose")
-    return {value["Service"]: value for value in values}
+    return offline.parse_services(text)
 
 
 def status(root):
@@ -54,17 +42,21 @@ def status(root):
         lines.append(line)
     ready = all_running and not failed and services.get("mysql", {}).get("Health", "") in ("", "healthy")
     if ready:
-        for port in (1119, 8081, 8085):
+        for port, label in ((1119, "Вход"), (8081, "Вход по HTTPS"), (8085, "Игровой мир")):
             try:
                 with socket.create_connection(("127.0.0.1", port), timeout=1):
                     pass
+                lines.append(f"{label}, порт {port}: доступен")
             except OSError:
                 ready = False
-                break
+                lines.append(f"{label}, порт {port}: нет подключения")
     if failed:
         message = "Один из процессов завершился с ошибкой. Откройте «Журнал движка»; ожидание импорта это не исправит."
     elif ready:
         message = "Движок принимает подключения. Можно открыть игровой лаунчер."
+    elif all_running and offline.internal_network(command):
+        message = ("Обнаружена устаревшая сеть Docker, блокирующая подключение с компьютера. "
+                   "Нажмите «Запустить локальный движок» для исправления с сохранением базы.")
     elif all_running:
         message = ("Процессы работают, но подключения ещё недоступны. Может идти подготовка или импорт; "
                    "причину и продвижение смотрите в «Журнале движка».")
@@ -116,12 +108,13 @@ def prepare(root, version, manifest, client, progress):
     return profile
 
 
-def engine(root, operation):
+def engine(root, operation, progress=None):
     profile = root / "profile"
     settings, env, command = offline.configuration(profile)
     if operation == "start":
         offline.check_files(Path(settings["data"]), Path(settings["certs"]))
         offline.require_images(settings)
+        offline.repair_network(env, command, progress)
     args = {"start": ["up", "--detach", "--pull", "never", "--no-build"],
             "stop": ["stop"], "logs": ["logs", "--tail", "60", "mysql", "worldserver", "bnetserver"]}[operation]
     return command_output(command + args, env=env)

@@ -122,6 +122,39 @@ class OfflineTests(unittest.TestCase):
             offline.configuration(self.state)
         self.assertEqual(changed.read_text(), "keep this local change")
 
+    def test_network_migration_never_stops_an_importing_world(self):
+        command = ["docker", "compose", "--project-name", "fixture"]
+        services = json.dumps([{"Service": "mysql", "State": "running", "Health": "healthy"},
+                               {"Service": "worldserver", "State": "running"}])
+        responses = [subprocess.CompletedProcess([], 0, services), subprocess.CompletedProcess([], 1, "")]
+        with patch.object(offline, "internal_network", return_value=True), \
+                patch.object(offline, "capture_command", side_effect=responses) as capture:
+            with self.assertRaisesRegex(ValueError, "Импорт не прерывался"):
+                offline.repair_network({}, command)
+        self.assertFalse(any(call.args[0][-1] == "down" for call in capture.call_args_list))
+
+    def test_network_migration_preserves_volumes_after_live_readiness_check(self):
+        command = ["docker", "compose", "--project-name", "fixture"]
+        services = json.dumps([{"Service": "mysql", "State": "running", "Health": "healthy"},
+                               {"Service": "worldserver", "State": "running"}])
+        responses = [subprocess.CompletedProcess([], 0, services), subprocess.CompletedProcess([], 0, ""),
+                     subprocess.CompletedProcess([], 0, "")]
+        with patch.object(offline, "internal_network", return_value=True), \
+                patch.object(offline, "capture_command", side_effect=responses) as capture:
+            self.assertTrue(offline.repair_network({}, command))
+        calls = [call.args[0] for call in capture.call_args_list]
+        self.assertIn("exec 3<>/dev/tcp/127.0.0.1/8085", calls[1])
+        self.assertEqual(calls[-1], command + ["down"])
+        self.assertFalse(any("--volumes" in call for call in calls))
+
+    def test_network_migration_does_not_stop_initializing_mysql(self):
+        services = json.dumps([{"Service": "mysql", "State": "running", "Health": "starting"}])
+        with patch.object(offline, "internal_network", return_value=True), \
+                patch.object(offline, "capture_command", return_value=subprocess.CompletedProcess([], 0, services)) as capture:
+            with self.assertRaisesRegex(ValueError, "готовности базы"):
+                offline.repair_network({}, ["docker", "compose"])
+        self.assertEqual(capture.call_count, 1)
+
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose not installed")
     def test_real_compose_configuration(self):
         self.initialize()
@@ -132,7 +165,8 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, "Docker Compose rejected the offline configuration")
         config = json.loads(result.stdout)
         self.assertEqual(set(config["services"]), {"mysql", "worldserver", "bnetserver"})
-        self.assertTrue(config["networks"]["local"]["internal"])
+        self.assertFalse(config["networks"]["local"].get("internal", False))
+        self.assertEqual(config["networks"]["local"]["driver"], "bridge")
         for service in config["services"].values():
             self.assertEqual(service["pull_policy"], "never")
             self.assertNotIn("build", service)

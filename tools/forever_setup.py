@@ -176,7 +176,7 @@ class Launcher:
         version, manifest = self.installed()
         runtime.prepare(self.root, version, manifest, self.client_path, self.progress)
         self.save_client(self.client_path)
-        runtime.engine(self.root, "start")
+        runtime.engine(self.root, "start", self.progress)
         self.engine_status()
 
     def engine_status(self):

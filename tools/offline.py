@@ -13,6 +13,57 @@ ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 CONFIG = ROOT / "config" / "offline"
 
 
+def capture_command(command, env=None, check=True):
+    return subprocess.run(command, env=env, check=check, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace",
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def parse_services(text):
+    if not text.strip():
+        return {}
+    try:
+        values = json.loads(text)
+        if isinstance(values, dict):
+            values = [values]
+    except json.JSONDecodeError:
+        values = [json.loads(line) for line in text.splitlines() if line.strip()]
+    if not isinstance(values, list) or any(not isinstance(v, dict) or "Service" not in v for v in values):
+        raise ValueError("Не удалось разобрать состояние Docker Compose")
+    return {value["Service"]: value for value in values}
+
+
+def internal_network(command):
+    project = command[command.index("--project-name") + 1]
+    inspected = capture_command(["docker", "network", "inspect", project + "_local",
+                                 "--format", "{{.Internal}}"], check=False)
+    return not inspected.returncode and (inspected.stdout or "").strip().lower() == "true"
+
+
+def repair_network(env, command, progress=None):
+    if not internal_network(command):
+        return False
+    services = parse_services(capture_command(command + ["ps", "--all", "--format", "json"], env=env).stdout)
+    mysql = services.get("mysql", {})
+    if mysql.get("State") == "running" and mysql.get("Health", "") not in ("", "healthy"):
+        raise ValueError("Найдена устаревшая сеть Docker. Сначала дождитесь готовности базы или проверьте её журнал.")
+    world = services.get("worldserver", {})
+    if world.get("State") == "running":
+        # The host cannot connect through the broken network. Probe the live
+        # world listener INSIDE its container; do not rely on old log lines.
+        inside = capture_command(command + ["exec", "-T", "worldserver", "bash", "-c",
+                                            "exec 3<>/dev/tcp/127.0.0.1/8085"], env=env, check=False)
+        if inside.returncode:
+            raise ValueError("Сеть требует исправления, но загрузка мира ещё не подтверждена. "
+                             "Дождитесь строки worldserver ready в журнале. Импорт не прерывался.")
+    if progress:
+        progress("Исправление подключения Docker: переключение локальной сети. База и сохранения остаются на месте.")
+    # Remove only this profile's containers/network, gracefully. No --volumes:
+    # keep database, extracted data, certificates and passwords unchanged.
+    capture_command(command + ["down"], env=env)
+    return True
+
+
 def runtime_resources(state):
     # MySQL starts as a dedicated unprivileged container user. Application
     # bundles and some checkouts have private directory modes, so they must
@@ -122,6 +173,7 @@ def main(argv=None):
     if args.action == "start":
         check_files(Path(settings["data"]), Path(settings["certs"]))
         require_images(settings)
+        repair_network(env, command, print)
     result = subprocess.run(command + operations[args.action], env=env)
     if result.returncode == 0 and args.action == "start":
         print("Контейнеры запущены. Проверьте logs: первый импорт базы может занять много времени. "
