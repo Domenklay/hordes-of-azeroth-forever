@@ -63,6 +63,7 @@ __pycache__/
 tools/clientfix/build/
 
 !/README.upstream.md
+!/mods/
 
 # Local offline runtime credentials; also protect custom profiles under tools/.
 **/database.env

@@ -1,0 +1,61 @@
+name: Build Hordes survivor engine
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'mods/hordes-forever/server/**'
+      - 'mods/hordes-forever/sql/**'
+      - 'tools/distribution/inject_hordes.py'
+      - 'tools/distribution/check_mode_compile.py'
+      - 'tools/distribution/prepare_mode_build.py'
+      - '.github/workflows/build-survivor.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hordes-survivor-engine
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Domenklay/WoWForEver
+          ref: a7e7747778042b537d062f019bbf2465d67a2863
+          path: donor
+      - name: Prepare mode source and additive SQL
+        run: python3 tools/distribution/prepare_mode_build.py donor
+      - name: Build the actual survivor adapter and engine
+        run: |
+          set -o pipefail
+          docker build --build-arg BUILD_JOBS=2 --tag hoa-forever-core:0.2.0-preview.1 donor 2>&1 | tee engine-build.log
+      - name: Expose useful failure details
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('engine-build.log')
+          if p.exists():
+              text=p.read_text(errors='replace')[-22000:]
+              text=text.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+              print('::error title=Hordes engine build::'+text)
+          PY
+      - name: Export tested engine image
+        run: |
+          mkdir -p output
+          set -o pipefail
+          docker save hoa-forever-core:0.2.0-preview.1 | gzip -1 > output/core.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hordes-engine
+          path: output/core.tar.gz
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
