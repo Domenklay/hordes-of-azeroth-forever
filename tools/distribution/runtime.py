@@ -41,6 +41,8 @@ def status(root):
             line += "; проверка работоспособности не пройдена"
             failed = True
         lines.append(line)
+        if service.get("Image") and name == "worldserver":
+            lines.append("Образ мира: " + service["Image"])
     ready = all_running and not failed and services.get("mysql", {}).get("Health", "") in ("", "healthy")
     if ready:
         for port, label in ((1119, "Вход"), (8081, "Вход по HTTPS"), (8085, "Игровой мир")):

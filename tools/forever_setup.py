@@ -17,7 +17,7 @@ from distribution import installer, runtime
 class Launcher:
     def __init__(self, window):
         self.window = window
-        window.title("Hordes Forever 0.2.0-preview.3 — локальная игра")
+        window.title("Hordes Forever 0.2.0-preview.4 — локальная игра")
         window.geometry("850x720")
         window.minsize(700, 620)
         self.events = queue.Queue()
