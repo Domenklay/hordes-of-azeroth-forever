@@ -28,6 +28,6 @@ result = subprocess.run(command, cwd=entry["directory"], stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, text=True)
 print(result.stdout)
 if result.returncode:
-    diagnostic = result.stdout[-20000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    diagnostic = result.stdout[-3000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Hordes TrinityCore API check::" + diagnostic)
 sys.exit(result.returncode)

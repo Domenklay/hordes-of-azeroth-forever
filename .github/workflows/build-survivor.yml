@@ -43,7 +43,7 @@ jobs:
           from pathlib import Path
           p=Path('engine-build.log')
           if p.exists():
-              text=p.read_text(errors='replace')[-22000:]
+              text=p.read_text(errors='replace')[-3000:]
               text=text.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
               print('::error title=Hordes engine build::'+text)
           PY
