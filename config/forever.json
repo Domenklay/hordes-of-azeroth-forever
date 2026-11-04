@@ -1,0 +1,33 @@
+{
+  "status": "source-import-and-initial-localization",
+  "playableForeverPort": false,
+  "upstream": {
+    "repository": "jonhaldors/hordes-of-azeroth",
+    "commit": "c3203da2eaa04fc8aae532ee6792c089520bb98e",
+    "clientBuild": 5875,
+    "server": "VMaNGOS"
+  },
+  "target": {
+    "referenceRepository": "Domenklay/WoWForEver",
+    "referenceCommit": "a7e7747778042b537d062f019bbf2465d67a2863",
+    "documentedClientBuild": 70450,
+    "userExperimentalClientBuild": 70532,
+    "interfaceVersion": 16001,
+    "coreRepository": "advocaite/TrinityCore",
+    "coreBranch": "forever",
+    "referenceCoreCommit": "91d49b230f89c3ab4719f5b2b2d1e70ed36613c4",
+    "latestInspectedCoreCommit": "b6ae12c227ef00bfe24fdaf16fba28acc61a5b7f",
+    "skyborne": [
+      { "raceId": 95, "faction": "Alliance", "enum": "RACE_SKYBORNE_ALLIANCE" },
+      { "raceId": 96, "faction": "Horde", "enum": "RACE_SKYBORNE_HORDE" }
+    ],
+    "raceSource": "src/server/game/Miscellaneous/RaceMask.h"
+  },
+  "validation": {
+    "mockApiTests": true,
+    "foreverServerBuilt": false,
+    "foreverClientRun": false,
+    "skyborneCharacterCreation": false,
+    "fullRussianTranslation": false
+  }
+}

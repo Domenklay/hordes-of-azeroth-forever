@@ -6,6 +6,7 @@
 ## SavedVariables: VanillaBonkChoiceKeys, VanillaBonkMeterMode, VanillaBonkPerfLog, VanillaBonkTutorialDone, VanillaBonkDashShift, VanillaBonkPlateGuideDone, VanillaBonkControllerSettings, VanillaBonkControllerTipDone, VanillaBonkVendorTip, VanillaBonkOptions, VanillaBonkHearthTipDone, VanillaBonkKeysGiven, VanillaBonkBindings, VanillaBonkInnkeeperTip, VanillaBonkMeterHidden, VanillaBonkDeckTip, VanillaBonkPartyMeterOpen
 VanillaBonkLocale.lua
 VanillaBonkLocaleZhCN.lua
+VanillaBonkLocaleRuRU.lua
 VanillaBonkUI.lua
 VanillaBonkFound.lua
 VanillaBonkSpellTip.lua

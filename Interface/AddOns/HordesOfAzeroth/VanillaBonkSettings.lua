@@ -169,6 +169,7 @@ end
 UI.LANGUAGES = {
     { value = "enUS", label = "English" },
     { value = "zhCN", label = "简体中文" },
+    { value = "ruRU", label = "Русский" },
 }
 
 UI.LANGUAGE_CVAR = "hoaLanguage"

@@ -56,7 +56,7 @@ BONK_IRONMAN_TIP = L["This character does not share gold or unlocks with other c
 local NUM_STAT_ROWS = 9;
 local NUM_SPELL_ROWS = 7;
 local NUM_SPECS = 3;
-local NUM_CLASS_RACES = 8;
+local NUM_CLASS_RACES = 12;
 local ROW_STEP = 58;
 local IRONMAN_NAME = "Ironmanmode";
 local RACES_PER_ROW = 4;
@@ -270,7 +270,8 @@ function CharacterCreate_OnShow()
 	OriginalCharacterCreateOnShow();
 	CharacterCreateFrame:Hide();
 	BonkHeroFrame:Show();
-	if ( Bonk.unknownHero and BonkHero_LearnClassNames() ) then
+	local learnedClasses = BonkHero_LearnClassNames();
+	if ( Bonk.unknownHero and learnedClasses ) then
 		BonkHero_OnCharacterList();
 	end
 	Bonk.appliedRace = nil;
@@ -425,12 +426,19 @@ local function SetTexCoords(texture, coords)
 	texture:SetTexCoord(coords[1], coords[2], coords[3], coords[4]);
 end
 
-local function RaceIconCoords(race, sex)
+local function SetRaceIcon(texture, race, sex)
 	local gender = "MALE";
 	if ( sex == 2 ) then
 		gender = "FEMALE";
 	end
-	return RACE_ICON_TCOORDS[race.."_"..gender];
+	local coords = RACE_ICON_TCOORDS[race.."_"..gender];
+	if ( coords ) then
+		texture:SetTexture("Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Races");
+		SetTexCoords(texture, coords);
+	else
+		texture:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark");
+		texture:SetTexCoord(0, 1, 0, 1);
+	end
 end
 
 local function SexName(sex)
@@ -590,35 +598,12 @@ function BonkHero_ReadHeroes()
 	end
 end
 
-local CLASS_NAME_RACES = { "HUMAN", "TAUREN" };
-
-local function LearnClassesOfSelectedRace()
-	local classes = { GetClassesForRace() };
-	for i = 1, getn(classes) / 2 do
-		local name = classes[i * 2 - 1];
-		local token = strupper(classes[i * 2] or "");
-		if ( name and BONK_CLASS_TOKENS[token] == token ) then
-			BONK_CLASS_TOKENS[name] = token;
-		end
-	end
-end
-
 function BonkHero_LearnClassNames()
 	if ( Bonk.classNamesLearned ) then
 		return false;
 	end
-	Bonk.classNamesLearned = true;
-	local races = { GetAvailableRaces() };
-	for _, raceToken in CLASS_NAME_RACES do
-		for i = 1, getn(races) / 2 do
-			if ( strupper(races[i * 2]) == raceToken ) then
-				SetSelectedRace(i);
-				SetCharacterRace(i);
-				LearnClassesOfSelectedRace();
-			end
-		end
-	end
-	return true;
+	Bonk.classNamesLearned = BonkRaceCatalog.Read(BONK_CLASSES, BONK_RACE_NAMES, BONK_RACE_DISPLAY_NAMES, BONK_CLASS_TOKENS, L);
+	return Bonk.classNamesLearned;
 end
 
 local function SelectClassToken(classToken)
@@ -809,12 +794,15 @@ function BonkHero_UpdateClassInfo(class, sex)
 
 	BonkClassBlurb:SetText(info.blurb);
 
+	local iconSize = math.min(22, floor((212 - (getn(class.races) - 1) * 4) / math.max(1, getn(class.races))));
 	for index = 1, NUM_CLASS_RACES do
 		local frame = getglobal("BonkClassRace"..index);
 		local race = class.races[index];
 		if ( race ) then
+			frame:SetWidth(iconSize);
+			frame:SetHeight(iconSize);
 			frame.race = race;
-			SetTexCoords(getglobal(frame:GetName().."Icon"), RaceIconCoords(race, sex));
+			SetRaceIcon(getglobal(frame:GetName().."Icon"), race, sex);
 			frame:Show();
 		else
 			frame:Hide();
@@ -923,7 +911,7 @@ function BonkHero_UpdateAppearance(class)
 	BonkHeroIronman:SetChecked(Flag(Bonk.ironman));
 	local raceCount = getn(class.races);
 	local rows = ceil(raceCount / RACES_PER_ROW);
-	for index = 1, 8 do
+	for index = 1, NUM_CLASS_RACES do
 		local button = getglobal("BonkHeroRaceButton"..index);
 		local race = class.races[index];
 		if ( race ) then
@@ -938,7 +926,7 @@ function BonkHero_UpdateAppearance(class)
 			button:SetPoint("TOP", "BonkRaceBox", "TOP", x, -10 - rowIndex * RACE_ROW_STEP);
 			local icon = getglobal(button:GetName().."Icon");
 			icon:SetTexture("Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Races");
-			SetTexCoords(icon, RaceIconCoords(race, Bonk.sex));
+			SetRaceIcon(icon, race, Bonk.sex);
 			getglobal(button:GetName().."Label"):SetText(BONK_RACE_DISPLAY_NAMES[race]);
 			button:SetChecked(Flag(index == Bonk.raceIndex));
 			button:Show();

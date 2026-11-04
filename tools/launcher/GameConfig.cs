@@ -21,6 +21,7 @@ namespace HordesOfAzeroth.Launcher
         {
             ("enUS", "English"),
             ("zhCN", "简体中文"),
+            ("ruRU", "Русский"),
         };
 
         static readonly string[] CarriedOver =

@@ -20,7 +20,7 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <Repository Condition="'$(Repository)' == ''">jonhaldors/hordes-of-azeroth</Repository>
+    <Repository Condition="'$(Repository)' == ''">Domenklay/hordes-of-azeroth-forever</Repository>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">

@@ -539,6 +539,10 @@
 							<CheckButton name="BonkHeroRaceButton6" inherits="BonkRaceButtonTemplate" id="6"/>
 							<CheckButton name="BonkHeroRaceButton7" inherits="BonkRaceButtonTemplate" id="7"/>
 							<CheckButton name="BonkHeroRaceButton8" inherits="BonkRaceButtonTemplate" id="8"/>
+							<CheckButton name="BonkHeroRaceButton9" inherits="BonkRaceButtonTemplate" id="9"/>
+							<CheckButton name="BonkHeroRaceButton10" inherits="BonkRaceButtonTemplate" id="10"/>
+							<CheckButton name="BonkHeroRaceButton11" inherits="BonkRaceButtonTemplate" id="11"/>
+							<CheckButton name="BonkHeroRaceButton12" inherits="BonkRaceButtonTemplate" id="12"/>
 						</Frames>
 					</Frame>
 					<Frame name="BonkGenderBox" inherits="BonkInsetTemplate">
@@ -885,6 +889,34 @@
 									</Anchor>
 								</Anchors>
 							</Frame>
+                            <Frame name="BonkClassRace9" inherits="BonkRaceIconTemplate" id="9">
+                                <Anchors>
+                                    <Anchor point="LEFT" relativeTo="BonkClassRace8" relativePoint="RIGHT">
+                                        <Offset><AbsDimension x="4" y="0"/></Offset>
+                                    </Anchor>
+                                </Anchors>
+                            </Frame>
+                            <Frame name="BonkClassRace10" inherits="BonkRaceIconTemplate" id="10">
+                                <Anchors>
+                                    <Anchor point="LEFT" relativeTo="BonkClassRace9" relativePoint="RIGHT">
+                                        <Offset><AbsDimension x="4" y="0"/></Offset>
+                                    </Anchor>
+                                </Anchors>
+                            </Frame>
+                            <Frame name="BonkClassRace11" inherits="BonkRaceIconTemplate" id="11">
+                                <Anchors>
+                                    <Anchor point="LEFT" relativeTo="BonkClassRace10" relativePoint="RIGHT">
+                                        <Offset><AbsDimension x="4" y="0"/></Offset>
+                                    </Anchor>
+                                </Anchors>
+                            </Frame>
+                            <Frame name="BonkClassRace12" inherits="BonkRaceIconTemplate" id="12">
+                                <Anchors>
+                                    <Anchor point="LEFT" relativeTo="BonkClassRace11" relativePoint="RIGHT">
+                                        <Offset><AbsDimension x="4" y="0"/></Offset>
+                                    </Anchor>
+                                </Anchors>
+                            </Frame>
 							<Frame name="BonkClassStarter" inherits="BonkSpellRowTemplate">
 								<Size>
 									<AbsDimension x="200" y="26"/>

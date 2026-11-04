@@ -19,6 +19,7 @@ namespace HordesOfAzeroth.Launcher
         static readonly Dictionary<string, Dictionary<string, string>> Tables = new Dictionary<string, Dictionary<string, string>>
         {
             ["zhCN"] = LocZhCN.Strings,
+            ["ruRU"] = LocRuRU.Strings,
         };
 
         static readonly ConditionalWeakTable<AvaloniaObject, Dictionary<AvaloniaProperty, Shown>> Originals =

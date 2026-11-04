@@ -68,7 +68,7 @@ namespace HordesOfAzeroth.Launcher
         public static readonly string Repository = typeof(UpdateCheck).Assembly
             .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
             .OfType<System.Reflection.AssemblyMetadataAttribute>()
-            .FirstOrDefault(a => a.Key == "Repository")?.Value ?? "jonhaldors/hordes-of-azeroth";
+            .FirstOrDefault(a => a.Key == "Repository")?.Value ?? "Domenklay/hordes-of-azeroth-forever";
 
         static string ManifestUrl => $"https://github.com/{Repository}/releases/latest/download/{Platform.ManifestName}";
 

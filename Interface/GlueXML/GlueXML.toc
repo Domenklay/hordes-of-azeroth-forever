@@ -22,6 +22,8 @@ BonkAccount.lua
 BonkStats.lua
 BonkGlueLocale.lua
 BonkGlueLocaleZhCN.lua
+BonkGlueLocaleRuRU.lua
+BonkRaceCatalog.lua
 BonkGlue.xml
 BonkCoop.xml
 BonkGluePad.xml
